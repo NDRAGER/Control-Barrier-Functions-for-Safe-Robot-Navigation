@@ -12,7 +12,7 @@ import cvxpy as cp
 import matplotlib.pyplot as plt
 from matplotlib.animation import FuncAnimation
 from matplotlib.patches import Circle
-import matplotlib.patches as mpatches
+#import matplotlib.patches as mpatches
 
 
 # ============================================================================

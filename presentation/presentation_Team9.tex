@@ -1,0 +1,98 @@
+\documentclass{beamer}
+\usetheme{CambridgeUS}
+\usecolortheme{default}
+\usebeamerfont{structurebold}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{shapes,arrows,positioning}
+
+\title{Control Barrier Functions for Safe Multi-Robot Navigation}
+\author{Satvik Tajane, Harsh Akabari, Nicolas Drager}
+
+
+\setbeamertemplate{footline}
+{
+	\leavevmode%
+	\hbox{%
+		\begin{beamercolorbox}[wd=1.0\paperwidth,ht=2.25ex,dp=1ex,right]{date in head/foot}%
+			\usebeamerfont{date in head/foot}
+			\insertframenumber{} / \inserttotalframenumber\hspace*{2ex}
+		\end{beamercolorbox}%
+	}%
+	\vskip0pt%
+}
+
+\begin{document}
+	
+	\begin{frame}
+		\titlepage
+	\end{frame}
+	
+	% ========== TOC ==========
+	\begin{frame}{Outline}
+		\tableofcontents
+	\end{frame}
+	
+	% ========== INTRODUCTION ==========
+	\section{Introduction}
+	\begin{frame}{Introduction}
+		\begin{itemize}
+			\item \textbf{Safety in robotics} varies by application domain
+			\begin{itemize}
+				\item Manipulators, mobile platforms, drones, humanoids
+			\end{itemize}
+			\item Safety-critical systems require formal, mathematically-grounded frameworks
+			\item Control Barrier Functions (CBFs) provide systematic safety enforcement
+			\item Here we present:
+			\begin{itemize}
+				\item Theoretical foundations of CBFs
+				\item Practical implementation via quadratic programming (QP)
+				\item Application to robotic systems and human-robot collaboration
+			\end{itemize} 
+		\end{itemize}
+	\end{frame}
+	
+	% ========== WHAT ARE CBFS? ==========
+	\section{Control Barrier Functions: Theory}
+	
+	\begin{frame}{Control Barrier Functions: Definition}
+		Consider nonlinear control-affine system:
+		\[
+		\dot{x} = f(x) + g(x)u, \quad x \in \mathcal{D} \subset \mathbb{R}^n, \quad u \in U
+		\]
+		
+		\textbf{Safe set} $\mathcal{S} \subset \mathcal{D}$: forward invariant region.
+		
+		\begin{block}{Definition of CBF}
+			Function $h: \mathcal{D} \to \mathbb{R}$ is a \textbf{CBF} if:
+			\[
+			\sup_{u \in U} \left[ \frac{\partial h}{\partial x} f(x) + \frac{\partial h}{\partial x} g(x) u \right] \geq -\alpha(h(x))
+			\]
+			where $\alpha$ is extended class $\mathcal{K}$.
+		\end{block}
+	\end{frame}
+	
+	\begin{frame}{CBF-Based Safety Filter}
+		\begin{itemize}
+			\item CBF acts as \textbf{safety filter} on nominal controller
+			\item Minimally invasive: modifies control only when necessary
+			\item Implemented via Quadratic Programming (QP):
+			\[
+			u^* = \arg\min_{u \in U} \|u - u_{\text{des}}\|^2
+			\]
+			subject to:
+			\[
+			L_f h(x) + L_g h(x) u \geq -\alpha(h(x))
+			\]
+		\end{itemize}
+		
+	\end{frame}
+	\begin{frame}{Our Project: Multi-Robot CBF}
+		\begin{itemize}
+			
+		\end{itemize}
+	\end{frame}
+\end{document}
