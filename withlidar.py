@@ -55,12 +55,9 @@ class TurtleBot:
 
     def update(self, v_cmd, w_cmd, dt, time, cbf_active, h_value):
         """Update robot state with velocity commands and log all data"""
-        # Apply acceleration limits
-        v_actual, w_actual = self.apply_acceleration_limits(v_cmd, w_cmd, dt)
-
-        # Update velocities
-        self.v = v_actual
-        self.w = w_actual
+        # Velocities are now already constrained by QP, just apply them directly
+        self.v = v_cmd
+        self.w = w_cmd
 
         # Update position
         self.x += self.v * np.cos(self.theta) * dt
@@ -80,7 +77,7 @@ class TurtleBot:
 
 
 class CBFController:
-    def __init__(self, gamma=3.0, lidar_rays=72):
+    def __init__(self, gamma=3.0, lidar_rays=360):
         self.gamma = gamma
         self.lidar_rays = lidar_rays  # Number of LIDAR rays (360°/lidar_rays = angular resolution)
 
@@ -280,7 +277,9 @@ class CBFController:
             dx = robot.x - obs_x
             dy = robot.y - obs_y
             dist_sq = dx ** 2 + dy ** 2
-            h = dist_sq - robot.radius ** 2
+            # Add safety buffer: treat robot as slightly larger to prevent h from reaching 0
+            safety_buffer = 0.25  # 25cm extra margin - even more conservative
+            h = dist_sq - (robot.radius + safety_buffer) ** 2
         else:
             # Fallback
             h = 10.0
@@ -327,8 +326,23 @@ class CBFController:
         self.last_detections = detections
 
         # Only activate CBF if close to any obstacle
-        if h > 2.0:
+        if h > 3.0:
             return v_des, w_des, False  # Not close, use nominal control
+
+        # Emergency recovery if h is very low (but allow some forward motion to escape)
+        if h < 0.15:  # Trigger much earlier to avoid getting trapped
+            print(f"EMERGENCY: h={h:.3f}, recovering...")
+            # Turn away from obstacle while maintaining forward speed to escape
+            angle_to_obs = np.arctan2(-dy, -dx)
+            angle_diff = np.arctan2(np.sin(angle_to_obs - robot.theta),
+                                    np.cos(angle_to_obs - robot.theta))
+            turn_direction = -np.sign(angle_diff) if angle_diff != 0 else 1.0
+
+            # More aggressive recovery: maintain decent speed to escape
+            if abs(angle_diff) > np.pi / 3:  # Mostly facing away (120° cone)
+                return 0.2, turn_direction * robot.max_w * 0.4, True
+            else:  # Still need to turn more
+                return 0.1, turn_direction * robot.max_w * 0.7, True
 
         # Check if we're heading toward the critical obstacle
         angle_to_obs = np.arctan2(-dy, -dx)
@@ -352,26 +366,29 @@ class CBFController:
             turn_bias = np.sign(angle_to_goal_diff)
 
         # If pointing toward obstacle and close, we need to turn
-        heading_toward_obstacle = abs(angle_diff) < np.pi / 3 and h < 1.0
+        heading_toward_obstacle = abs(angle_diff) < np.pi / 4 and h < 1.2
 
         if heading_toward_obstacle:
             # Use the turn_bias we already calculated above
 
             def objective(u):
                 v, w = u
-                # Moderate penalty on forward velocity (reduced from 10.0 to 5.0)
-                if h < 0.3:
-                    v_penalty = 8.0 * v ** 2  # Very close - strong stop
-                elif h < 0.6:
-                    v_penalty = 4.0 * v ** 2  # Close - moderate stop
+                # More conservative velocity penalties when close
+                if h < 0.2:
+                    # Very close - strongly prefer slowing down
+                    v_penalty = 4.0 * (v - v_des * 0.2) ** 2
+                elif h < 0.4:
+                    # Close - allow moderate speed
+                    v_penalty = 2.0 * (v - v_des * 0.5) ** 2
                 else:
-                    v_penalty = 2.0 * (v - v_des) ** 2  # Not too close - gentle slowdown
+                    # Not too close - allow most of desired speed
+                    v_penalty = 0.5 * (v - v_des * 0.8) ** 2
 
-                # Encourage turning, but less aggressively (0.5 instead of 0.7)
-                w_target = turn_bias * robot.max_w * 0.5
-                w_penalty = (w - w_target) ** 2
+                # Gentler turning encouragement
+                w_target = turn_bias * robot.max_w * 0.3
+                w_penalty = 0.5 * (w - w_target) ** 2
 
-                return v_penalty + 0.5 * w_penalty
+                return v_penalty + w_penalty
         else:
             # Normal QP objective - just stay close to desired
             def objective(u):
@@ -379,20 +396,37 @@ class CBFController:
                 return (v - v_des) ** 2 + 0.5 * (w - w_des) ** 2
 
         # Constraint function uses the dx, dy from the critical point
+        # Add look-ahead term for discrete-time safety
         def constraint(u):
             v, w = u
             h_dot = self.compute_cbf_derivative(robot, None, dx, dy, v, w)
-            return h_dot + self.gamma * h
+            # Add extra margin for discrete-time safety (compensates for dt and acceleration)
+            dt = 0.05
+            # Worst-case: if we're accelerating toward obstacle
+            worst_case_margin = 0.5 * robot.max_a * dt * dt  # Conservative estimate
+            return h_dot + self.gamma * (h + worst_case_margin)
 
-        bounds = [(0, robot.max_v), (-robot.max_w, robot.max_w)]
+        # CRITICAL FIX: Bounds must respect acceleration limits from current velocity
+        dt = 0.05  # Simulation timestep
+        v_min = max(0, robot.v - robot.max_a * dt)
+        v_max = min(robot.max_v, robot.v + robot.max_a * dt)
+        w_min = max(-robot.max_w, robot.w - robot.max_alpha * dt)
+        w_max = min(robot.max_w, robot.w + robot.max_alpha * dt)
+
+        bounds = [(v_min, v_max), (w_min, w_max)]
         cons = {'type': 'ineq', 'fun': constraint}
 
         # Initial guess: bias toward solution
         if heading_toward_obstacle:
             turn_direction = turn_bias
-            initial_guess = [0.2, turn_direction * robot.max_w * 0.4]
+            # Gentler initial guess
+            initial_guess = [v_des * 0.5, turn_direction * robot.max_w * 0.3]
         else:
             initial_guess = [v_des, w_des]
+
+        # Clamp initial guess to bounds
+        initial_guess[0] = np.clip(initial_guess[0], v_min, v_max)
+        initial_guess[1] = np.clip(initial_guess[1], w_min, w_max)
 
         result = minimize(
             objective,
@@ -420,7 +454,7 @@ def run_simulation():
     # Multiple obstacles - creating a narrow passage
     obstacles = [
         {'x': 2.2, 'y': 1.7, 'radius': 0.5},  # Original obstacle
-        {'x': 1.5, 'y': 0.5, 'radius': 0.4}  # New obstacle bottom-left
+        {'x': 1.5, 'y': -0.2, 'radius': 0.4}  # Moved further down (was 0.5, now -0.2)
     ]
 
     # Simulation parameters
@@ -428,7 +462,7 @@ def run_simulation():
     max_time = 60.0
     time = 0.0
 
-    controller = CBFController(gamma=3.0, lidar_rays=72)
+    controller = CBFController(gamma=3.0, lidar_rays=360)
 
     # Run simulation
     print("Starting simulation...")
@@ -472,7 +506,7 @@ fig = plt.figure(figsize=(16, 10))
 # Top left: Trajectory
 ax1 = fig.add_subplot(221)
 ax1.set_xlim(-0.5, 6)
-ax1.set_ylim(-0.5, 4)
+ax1.set_ylim(-1, 4)
 ax1.set_aspect('equal')
 ax1.grid(True, alpha=0.3)
 ax1.set_xlabel('X (m)', fontsize=12)
