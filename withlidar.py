@@ -31,28 +31,6 @@ class TurtleBot:
             'time': [0.0]
         }
 
-    def apply_acceleration_limits(self, v_cmd, w_cmd, dt):
-        """Apply acceleration limits to commanded velocities"""
-        # Linear acceleration limit
-        dv = v_cmd - self.v
-        max_dv = self.max_a * dt
-        if abs(dv) > max_dv:
-            dv = np.sign(dv) * max_dv
-        v_limited = self.v + dv
-
-        # Angular acceleration limit
-        dw = w_cmd - self.w
-        max_dw = self.max_alpha * dt
-        if abs(dw) > max_dw:
-            dw = np.sign(dw) * max_dw
-        w_limited = self.w + dw
-
-        # Also enforce velocity limits
-        v_limited = np.clip(v_limited, 0, self.max_v)
-        w_limited = np.clip(w_limited, -self.max_w, self.max_w)
-
-        return v_limited, w_limited
-
     def update(self, v_cmd, w_cmd, dt, time, cbf_active, h_value):
         """Update robot state with velocity commands and log all data"""
         # Velocities are now already constrained by QP, just apply them directly
@@ -77,7 +55,7 @@ class TurtleBot:
 
 
 class CBFController:
-    def __init__(self, gamma=3.0, lidar_rays=360):
+    def __init__(self, gamma=3.0, lidar_rays=72):
         self.gamma = gamma
         self.lidar_rays = lidar_rays  # Number of LIDAR rays (360°/lidar_rays = angular resolution)
 
@@ -208,26 +186,25 @@ class CBFController:
 
         return clusters
 
-    def find_closest_point_per_object(self, robot, clusters):
+    def find_critical_points(self, robot, clusters, num_points=5):
         """
-        For each detected object (cluster), find the closest point to the robot.
-        Returns list of critical points, one per object.
+        For each detected object (cluster), find multiple critical points.
+        Returns list of critical points for multi-point CBF.
         """
         critical_points = []
 
         for cluster in clusters:
-            # Find closest point in this cluster
-            min_dist = float('inf')
-            closest_det = None
+            # Sort detections in this cluster by distance
+            sorted_cluster = sorted(cluster, key=lambda d: d['distance'])
 
-            for det in cluster:
-                if det['distance'] < min_dist:
-                    min_dist = det['distance']
-                    closest_det = det
+            # Take up to num_points closest detections from this cluster
+            num_to_take = min(num_points, len(sorted_cluster))
 
-            if closest_det:
+            for i in range(num_to_take):
+                det = sorted_cluster[i]
+
                 # Weight by heading direction
-                angle_to_point = closest_det['angle']
+                angle_to_point = det['angle']
                 angle_diff = np.arctan2(np.sin(angle_to_point - robot.theta),
                                         np.cos(angle_to_point - robot.theta))
 
@@ -235,11 +212,11 @@ class CBFController:
                 forward_weight = max(0.2, np.cos(angle_diff))
 
                 critical_points.append({
-                    'point': closest_det['point'],
-                    'distance': closest_det['distance'],
-                    'angle': closest_det['angle'],
+                    'point': det['point'],
+                    'distance': det['distance'],
+                    'angle': det['angle'],
                     'weight': forward_weight,
-                    'cluster_size': len(cluster)
+                    'cluster_id': clusters.index(cluster)
                 })
 
         return critical_points
@@ -248,101 +225,79 @@ class CBFController:
         """
         Compute CBF considering all obstacles.
         Performs LIDAR scan that detects all obstacles with proper occlusion.
+        Returns the minimum h value and all critical points for multi-point CBF.
         """
         # Scan all obstacles (with occlusion handling built-in)
         all_detections = self.lidar_scan(robot, obstacles)
 
         if not all_detections:
             # No detections, return safe value
-            return 10.0, 0.0, 0.0, []
+            return 10.0, [], all_detections
 
         # Cluster all detections into separate objects
         clusters = self.cluster_detections(all_detections, cluster_distance=0.3)
 
-        # Get closest point from each object
-        critical_points = self.find_closest_point_per_object(robot, clusters)
+        # Get multiple critical points from each object
+        critical_points = self.find_critical_points(robot, clusters, num_points=5)
 
-        # Find the most threatening critical point
-        min_weighted_dist = float('inf')
-        most_critical = None
-
+        # Compute h for each critical point
+        h_values = []
         for cp in critical_points:
-            weighted_dist = cp['distance'] / cp['weight']
-            if weighted_dist < min_weighted_dist:
-                min_weighted_dist = weighted_dist
-                most_critical = cp
-
-        if most_critical:
-            obs_x, obs_y = most_critical['point']
+            obs_x, obs_y = cp['point']
             dx = robot.x - obs_x
             dy = robot.y - obs_y
             dist_sq = dx ** 2 + dy ** 2
-            # Add safety buffer: treat robot as slightly larger to prevent h from reaching 0
-            safety_buffer = 0.25  # 25cm extra margin - even more conservative
+            safety_buffer = 0.05  # 5cm extra margin
             h = dist_sq - (robot.radius + safety_buffer) ** 2
-        else:
-            # Fallback
-            h = 10.0
-            dx = 0.0
-            dy = 0.0
+
+            # Store h value and gradient direction in the critical point
+            cp['h'] = h
+            cp['dx'] = dx
+            cp['dy'] = dy
+            h_values.append(h)
+
+        # Find minimum h (most critical)
+        min_h = min(h_values) if h_values else 10.0
 
         # Store for visualization
         self.last_clusters = clusters
         self.last_critical_points = critical_points
         self.last_detections = all_detections
 
-        return h, dx, dy, all_detections
+        return min_h, critical_points, all_detections
 
-    def compute_cbf(self, robot, obstacle):
+    def compute_cbf_derivative(self, robot, dx, dy, v, w):
         """
-        Compute CBF value using LIDAR-based surface detection for a single obstacle.
-        (Kept for backward compatibility)
-        """
-        return self.compute_cbf_all_obstacles(robot, [obstacle])
-
-    def compute_cbf_derivative(self, robot, obstacle, dx, dy, v, w):
-        """
-        Compute CBF time derivative
+        Compute CBF time derivative for a single point
         h(x) = ||p_robot - p_surface||^2 - R_robot^2
         h_dot = 2*(p_robot - p_surface)^T * p_robot_dot
-        Note: obstacle parameter is not used (kept for compatibility),
-        dx and dy are computed from the critical point
         """
         h_dot = 2 * (dx * v * np.cos(robot.theta) + dy * v * np.sin(robot.theta))
         return h_dot
 
     def safe_controller(self, robot, goal, obstacles):
-        """CBF-based QP controller with 360° LIDAR awareness for multiple obstacles"""
+        """CBF-based QP controller with multi-point CBF constraints"""
         v_des, w_des = self.nominal_controller(robot, goal)
 
         # Handle both single obstacle (dict) and multiple obstacles (list)
         if isinstance(obstacles, dict):
             obstacles = [obstacles]
 
-        # Compute CBF value using LIDAR-based surface detection for all obstacles
-        h, dx, dy, detections = self.compute_cbf_all_obstacles(robot, obstacles)
+        # Compute CBF values for all critical points
+        h_min, critical_points, detections = self.compute_cbf_all_obstacles(robot, obstacles)
 
         # Store detections for visualization
         self.last_detections = detections
 
         # Only activate CBF if close to any obstacle
-        if h > 3.0:
+        if h_min > 2.0:
             return v_des, w_des, False  # Not close, use nominal control
 
-        # Emergency recovery if h is very low (but allow some forward motion to escape)
-        if h < 0.15:  # Trigger much earlier to avoid getting trapped
-            print(f"EMERGENCY: h={h:.3f}, recovering...")
-            # Turn away from obstacle while maintaining forward speed to escape
-            angle_to_obs = np.arctan2(-dy, -dx)
-            angle_diff = np.arctan2(np.sin(angle_to_obs - robot.theta),
-                                    np.cos(angle_to_obs - robot.theta))
-            turn_direction = -np.sign(angle_diff) if angle_diff != 0 else 1.0
+        # Find the most critical point for turn bias calculation
+        most_critical = min(critical_points, key=lambda cp: cp['h'])
 
-            # More aggressive recovery: maintain decent speed to escape
-            if abs(angle_diff) > np.pi / 3:  # Mostly facing away (120° cone)
-                return 0.2, turn_direction * robot.max_w * 0.4, True
-            else:  # Still need to turn more
-                return 0.1, turn_direction * robot.max_w * 0.7, True
+        dx = most_critical['dx']
+        dy = most_critical['dy']
 
         # Check if we're heading toward the critical obstacle
         angle_to_obs = np.arctan2(-dy, -dx)
@@ -357,7 +312,6 @@ class CBFController:
                                         np.cos(angle_to_goal - robot.theta))
 
         # Determine turn bias (which direction to turn)
-        # This is computed regardless of whether we're heading toward obstacle
         if abs(angle_to_goal_diff) < np.pi / 4:
             # Goal is roughly ahead - turn away from obstacle
             turn_bias = -np.sign(angle_diff) if angle_diff != 0 else 1.0
@@ -366,61 +320,63 @@ class CBFController:
             turn_bias = np.sign(angle_to_goal_diff)
 
         # If pointing toward obstacle and close, we need to turn
-        heading_toward_obstacle = abs(angle_diff) < np.pi / 4 and h < 1.2
+        heading_toward_obstacle = abs(angle_diff) < np.pi / 3 and h_min < 1.0
 
         if heading_toward_obstacle:
-            # Use the turn_bias we already calculated above
-
             def objective(u):
                 v, w = u
-                # More conservative velocity penalties when close
-                if h < 0.2:
-                    # Very close - strongly prefer slowing down
-                    v_penalty = 4.0 * (v - v_des * 0.2) ** 2
-                elif h < 0.4:
-                    # Close - allow moderate speed
-                    v_penalty = 2.0 * (v - v_des * 0.5) ** 2
+                # Moderate penalty on forward velocity
+                if h_min < 0.3:
+                    v_penalty = 8.0 * v ** 2  # Very close - strong stop
+                elif h_min < 0.6:
+                    v_penalty = 4.0 * v ** 2  # Close - moderate stop
                 else:
-                    # Not too close - allow most of desired speed
-                    v_penalty = 0.5 * (v - v_des * 0.8) ** 2
+                    v_penalty = 2.0 * (v - v_des) ** 2  # Not too close - gentle slowdown
 
-                # Gentler turning encouragement
-                w_target = turn_bias * robot.max_w * 0.3
-                w_penalty = 0.5 * (w - w_target) ** 2
+                # Encourage turning
+                w_target = turn_bias * robot.max_w * 0.5
+                w_penalty = (w - w_target) ** 2
 
-                return v_penalty + w_penalty
+                return v_penalty + 0.5 * w_penalty
         else:
             # Normal QP objective - just stay close to desired
             def objective(u):
                 v, w = u
                 return (v - v_des) ** 2 + 0.5 * (w - w_des) ** 2
 
-        # Constraint function uses the dx, dy from the critical point
-        # Add look-ahead term for discrete-time safety
-        def constraint(u):
-            v, w = u
-            h_dot = self.compute_cbf_derivative(robot, None, dx, dy, v, w)
-            # Add extra margin for discrete-time safety (compensates for dt and acceleration)
-            dt = 0.05
-            # Worst-case: if we're accelerating toward obstacle
-            worst_case_margin = 0.5 * robot.max_a * dt * dt  # Conservative estimate
-            return h_dot + self.gamma * (h + worst_case_margin)
+        # MULTI-POINT CBF CONSTRAINTS
+        # Create a constraint for each critical point
+        constraints = []
 
-        # CRITICAL FIX: Bounds must respect acceleration limits from current velocity
-        dt = 0.05  # Simulation timestep
+        for cp in critical_points:
+            # Only constrain points that are relatively close
+            if cp['h'] < 2.0:
+                def make_constraint(cp_data):
+                    def constraint(u):
+                        v, w = u
+                        h_dot = self.compute_cbf_derivative(robot, cp_data['dx'], cp_data['dy'], v, w)
+                        return h_dot + self.gamma * cp_data['h']
+
+                    return constraint
+
+                constraints.append({
+                    'type': 'ineq',
+                    'fun': make_constraint(cp)
+                })
+
+        # Velocity bounds with acceleration limits
+        dt = 0.05
         v_min = max(0, robot.v - robot.max_a * dt)
         v_max = min(robot.max_v, robot.v + robot.max_a * dt)
         w_min = max(-robot.max_w, robot.w - robot.max_alpha * dt)
         w_max = min(robot.max_w, robot.w + robot.max_alpha * dt)
 
         bounds = [(v_min, v_max), (w_min, w_max)]
-        cons = {'type': 'ineq', 'fun': constraint}
 
         # Initial guess: bias toward solution
         if heading_toward_obstacle:
             turn_direction = turn_bias
-            # Gentler initial guess
-            initial_guess = [v_des * 0.5, turn_direction * robot.max_w * 0.3]
+            initial_guess = [0.2, turn_direction * robot.max_w * 0.4]
         else:
             initial_guess = [v_des, w_des]
 
@@ -433,7 +389,7 @@ class CBFController:
             initial_guess,
             method='SLSQP',
             bounds=bounds,
-            constraints=cons,
+            constraints=constraints,
             options={'maxiter': 100, 'ftol': 1e-6}
         )
 
@@ -442,7 +398,7 @@ class CBFController:
         else:
             # Emergency: turn toward goal if possible, otherwise away from obstacle
             turn_direction = turn_bias
-            print(f"QP failed at h={h:.3f}, turning")
+            print(f"QP failed at h={h_min:.3f}, turning")
             return 0.0, turn_direction * robot.max_w * 0.5, True
 
 
@@ -454,7 +410,7 @@ def run_simulation():
     # Multiple obstacles - creating a narrow passage
     obstacles = [
         {'x': 2.2, 'y': 1.7, 'radius': 0.5},  # Original obstacle
-        {'x': 1.5, 'y': -0.2, 'radius': 0.4}  # Moved further down (was 0.5, now -0.2)
+        {'x': 1.5, 'y': -0.2, 'radius': 0.4}  # New obstacle bottom-left
     ]
 
     # Simulation parameters
@@ -462,7 +418,7 @@ def run_simulation():
     max_time = 60.0
     time = 0.0
 
-    controller = CBFController(gamma=3.0, lidar_rays=360)
+    controller = CBFController(gamma=3.0, lidar_rays=72)
 
     # Run simulation
     print("Starting simulation...")
@@ -481,7 +437,7 @@ def run_simulation():
         v, w, cbf_active = controller.safe_controller(robot, goal, obstacles)
 
         # Compute CBF value for logging (using most critical obstacle)
-        h, _, _, _ = controller.compute_cbf_all_obstacles(robot, obstacles)
+        h, _, _ = controller.compute_cbf_all_obstacles(robot, obstacles)
 
         # Update robot with all data at once
         robot.update(v, w, dt, time, cbf_active, h)
@@ -511,7 +467,7 @@ ax1.set_aspect('equal')
 ax1.grid(True, alpha=0.3)
 ax1.set_xlabel('X (m)', fontsize=12)
 ax1.set_ylabel('Y (m)', fontsize=12)
-ax1.set_title('TurtleBot Trajectory with CBF Safety', fontsize=14, fontweight='bold')
+ax1.set_title('TurtleBot Trajectory with Multi-Point CBF Safety', fontsize=14, fontweight='bold')
 
 # Plot all obstacles
 for i, obstacle in enumerate(obstacles):
@@ -561,21 +517,21 @@ if hasattr(controller, 'last_detections') and controller.last_detections:
         ax1.plot([robot.x, hit_x], [robot.y, hit_y], 'g-', alpha=0.2, linewidth=0.5)
         ax1.plot(hit_x, hit_y, 'go', markersize=2, alpha=0.4)
 
-    # Highlight critical points (one per detected object)
+    # Highlight critical points (multiple per detected object)
     if hasattr(controller, 'last_critical_points'):
         for i, cp in enumerate(controller.last_critical_points):
             cp_x, cp_y = cp['point']
-            ax1.plot(cp_x, cp_y, 'ro', markersize=6, alpha=0.8,
-                     label=f'Critical Point (Obj {i + 1})' if i == 0 else '')
-            ax1.plot([robot.x, cp_x], [robot.y, cp_y], 'r-',
-                     linewidth=2, alpha=0.6)
+            ax1.plot(cp_x, cp_y, 'ro', markersize=4, alpha=0.6)
+            if i < 3:  # Only draw lines for first 3 to avoid clutter
+                ax1.plot([robot.x, cp_x], [robot.y, cp_y], 'r-',
+                         linewidth=1, alpha=0.4)
 
 ax1.legend(loc='upper left', fontsize=9)
 
 # Top right: CBF value over time
 ax2 = fig.add_subplot(222)
 time_array = np.array(trajectory['time'])
-ax2.plot(time_array, trajectory['h_values'], 'b-', linewidth=2, label='h(x)')
+ax2.plot(time_array, trajectory['h_values'], 'b-', linewidth=2, label='h(x) minimum')
 ax2.axhline(y=0, color='r', linestyle='--', linewidth=2, label='Safety Boundary (h=0)')
 ax2.fill_between(time_array, -1, 0, alpha=0.2, color='red', label='Unsafe Region')
 ax2.grid(True, alpha=0.3)
@@ -641,4 +597,6 @@ if hasattr(controller, 'last_clusters'):
     print(f"Number of detected objects at end: {len(controller.last_clusters)}")
     for i, cluster in enumerate(controller.last_clusters):
         print(f"  Object {i + 1}: {len(cluster)} LIDAR points")
+if hasattr(controller, 'last_critical_points'):
+    print(f"Total critical points being tracked: {len(controller.last_critical_points)}")
 print(f"{'=' * 50}")
