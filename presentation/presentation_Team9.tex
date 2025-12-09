@@ -114,15 +114,35 @@
 
 	\end{frame}
 	
-	\begin{frame}{LIDAR-Based Surface Detection and Distance Measurement}
-		\textbf{LIDAR} detects \textit{obstacle surfaces}
+\begin{frame}{LIDAR-Based Surface Detection and Distance Measurement}
+	
+	\begin{columns}
 		
-		\begin{itemize}
-			\item 360 rays at 1° resolution to detect surfaces and their distance to robot
-			\item Clustering (optional): group detections to identify objects
-		\end{itemize}
-		\vspace*{0.2cm}
+		% Left column for text content
+		\begin{column}{0.45\textwidth}
+			\textbf{LIDAR} detects \textit{obstacle surfaces}
+			
+			\bigskip
+			
+			\begin{itemize}
+				\item 360 rays at 1° resolution to detect surfaces and their distance to robot
+				\item Clustering (optional): group detections to identify objects
+			\end{itemize}
+		\end{column}
 		
+		% Right column for image
+		\begin{column}{0.45\textwidth}
+			\begin{figure}[h]
+				\centering
+				\includegraphics[width=\textwidth]{lidar.png}
+			\end{figure}
+		\end{column}
+		
+	\end{columns}
+	
+\end{frame}
+	
+		\begin{frame}{Barrier Function}
 		\textbf{For closest detected surface point} $\mathbf{p}_{\text{obs}}$:
 		\begin{block}{Barrier Function}
 			\begin{equation}
@@ -134,6 +154,8 @@
 		
 		\(\implies\)Allows the prioritization of objects, in our case fellow robots
 	\end{frame}
+	
+
 	
 	
 	\begin{frame}{QP-Based Safe Controller}
@@ -212,10 +234,45 @@
 	% ========== RESULTS ==========
 	\section{Experimental Results}
 	
-	\begin{frame}{Scenario 1: Single Robot with Rectangular Obstacle}
+		\begin{frame}{Scenario: One Robot with Obstacle}
 		
-		\textbf{Observation:} LIDAR accurately detects corners, enables tight maneuvering
+		\begin{figure}[h]
+			\centering
+			\includegraphics[width=0.90\textwidth]{rectangle.png}
+		\end{figure}
+		\textbf{Observation:} Obstacle is detected and avoided by turning!
 	\end{frame}
+	
+	\begin{frame}{Scenario: One Robot with Two Obstacles}
+		
+		\begin{figure}[h]
+			\centering
+			\includegraphics[width=0.90\textwidth]{2obstacle.png}
+		\end{figure}
+		\textbf{Observation:} Robot slows down and passes
+	\end{frame}
+	
+	
+	\begin{frame}{Scenario: Two Robots Crossover}
+	
+	\begin{figure}[h]
+		\centering
+		\includegraphics[width=0.90\textwidth]{cross.png}
+	\end{figure}
+	\(\implies\) One went in front of the other causing a emergency stop!
+	\end{frame}
+	
+	
+		\begin{frame}{Scenario: Two Robots with Obstacle (Priority System)}
+		
+		\begin{figure}[h]
+			\centering
+			\includegraphics[width=0.90\textwidth]{2robotobstacle.png}
+		\end{figure}
+	\(\implies\) The robot closest to the obstacle is the dominant one!
+	\end{frame}
+	
+
 	
 
 

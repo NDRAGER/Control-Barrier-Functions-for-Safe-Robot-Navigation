@@ -1,0 +1,389 @@
+\documentclass{beamer}
+\usetheme{CambridgeUS}
+\usecolortheme{default}
+\usebeamerfont{structurebold}
+\usepackage{graphicx}
+\usepackage{amsmath}
+\usepackage{amssymb}
+\usepackage{hyperref}
+\usepackage{tikz}
+\usetikzlibrary{shapes,arrows,positioning}
+
+\title{Control Barrier Functions for Safe Multi-Robot Navigation}
+\author{Satvik Tajane, Harsh Akabari, Nicolas Drager}
+
+
+\setbeamertemplate{footline}
+{
+	\leavevmode%
+	\hbox{%
+		\begin{beamercolorbox}[wd=1.0\paperwidth,ht=2.25ex,dp=1ex,right]{date in head/foot}%
+			\usebeamerfont{date in head/foot}
+			\insertframenumber{} / \inserttotalframenumber\hspace*{2ex}
+		\end{beamercolorbox}%
+	}%
+	\vskip0pt%
+}
+
+\begin{document}
+	
+	\begin{frame}
+		\titlepage
+	\end{frame}
+	
+	% ========== TOC ==========
+	\begin{frame}{Outline}
+		\tableofcontents
+	\end{frame}
+	
+	% ========== INTRODUCTION ==========
+	\section{Introduction}
+	\begin{frame}{Introduction}
+		\begin{itemize}
+			\item \textbf{Safety in robotics} varies by application domain
+			\begin{itemize}
+				\item Manipulators, mobile platforms, drones, humanoids
+			\end{itemize}
+			\item Safety-critical systems require formal, mathematically-grounded frameworks
+			\item Control Barrier Functions (CBFs) provide systematic safety enforcement
+			\item Here we present:
+			\begin{itemize}
+				\item Theoretical foundations of CBFs
+				\item Practical implementation via quadratic programming (QP)
+				\item Application to robotic systems and human-robot collaboration
+			\end{itemize} 
+		\end{itemize}
+	\end{frame}
+	
+	% ========== WHAT ARE CBFS? ==========
+	\section{Control Barrier Functions: Theory}
+	
+	\begin{frame}{Control Barrier Functions: Definition}
+		Consider nonlinear control-affine system:
+		\[
+		\dot{x} = f(x) + g(x)u, \quad x \in \mathcal{D} \subset \mathbb{R}^n, \quad u \in U
+		\]
+		
+		\textbf{Safe set} $\mathcal{S} \subset \mathcal{D}$: forward invariant region.
+		
+		\begin{block}{Definition of CBF}
+			Function $h: \mathcal{D} \to \mathbb{R}$ is a \textbf{CBF} if:
+			\[
+			\sup_{u \in U} \left[ \frac{\partial h}{\partial x} f(x) + \frac{\partial h}{\partial x} g(x) u \right] \geq -\alpha(h(x))
+			\]
+			where $\alpha$ is extended class $\mathcal{K}$.
+		\end{block}
+	\end{frame}
+	
+	\begin{frame}{CBF-Based Safety Filter}
+		\begin{itemize}
+			\item CBF acts as \textbf{safety filter} on nominal controller
+			\item Minimally invasive: modifies control only when necessary
+			\item Implemented via Quadratic Programming (QP):
+			\[
+			u^* = \arg\min_{u \in U} \|u - u_{\text{des}}\|^2
+			\]
+			subject to:
+			\[
+			L_f h(x) + L_g h(x) u \geq -\alpha(h(x))
+			\]
+		\end{itemize}
+		
+	\end{frame}
+	\begin{frame}{Our Project: Multi-Robot CBF}
+		\begin{itemize}
+			\item CBF acts as \textbf{safety filter} on nominal controller
+		\end{itemize}
+	\end{frame}
+	
+	% Preliminaries Slide
+	\begin{frame}{Preliminaries: Control Barrier Functions}
+		\begin{block}{Definition}
+			A Control Barrier Function (CBF) $h(\mathbf{x})$ ensures safety by defining:
+			\begin{itemize}
+				\item \textbf{Safe set}: $\mathcal{C} = \{\mathbf{x} \mid h(\mathbf{x}) \geq 0\}$
+				\item \textbf{Unsafe set}: $\{\mathbf{x} \mid h(\mathbf{x}) < 0\}$
+			\end{itemize}
+		\end{block}
+		
+		\begin{block}{Safety Guarantee}
+			If the control input $\mathbf{u}$ satisfies:
+			\begin{equation}
+				\dot{h}(\mathbf{x}, \mathbf{u}) + \gamma h(\mathbf{x}) \geq 0
+			\end{equation}
+			where $\gamma > 0$, then $h(\mathbf{x}) \geq 0$ for all future time, ensuring the system remains safe.
+		\end{block}
+	\end{frame}
+	
+% Preliminaries Slide
+\begin{frame}{Preliminaries: Control Barrier Functions}
+	\begin{block}{Definition}
+		A Control Barrier Function (CBF) $h(\mathbf{x})$ ensures safety by defining:
+		\begin{itemize}
+			\item \textbf{Safe set}: $\mathcal{C} = \{\mathbf{x} \mid h(\mathbf{x}) \geq 0\}$
+			\item \textbf{Unsafe set}: $\{\mathbf{x} \mid h(\mathbf{x}) < 0\}$
+		\end{itemize}
+	\end{block}
+	
+	\begin{block}{Safety Guarantee}
+		If the control input $\mathbf{u}$ satisfies:
+		\begin{equation}
+			\dot{h}(\mathbf{x}, \mathbf{u}) + \gamma h(\mathbf{x}) \geq 0
+		\end{equation}
+		where $\gamma > 0$, then $h(\mathbf{x}) \geq 0$ for all future time, ensuring the system remains safe.
+	\end{block}
+\end{frame}
+
+% Robot Model Slide
+\begin{frame}{Robot Model: Differential Drive TurtleBot}
+	\begin{columns}
+		\begin{column}{0.5\textwidth}
+			\textbf{State Variables:}
+			\begin{itemize}
+				\item Position: $(x, y)$
+				\item Heading: $\theta$
+				\item Robot radius: $R = 0.2$ m
+			\end{itemize}
+			
+			\textbf{Control Inputs:}
+			\begin{itemize}
+				\item Linear velocity: $v$
+				\item Angular velocity: $\omega$
+			\end{itemize}
+		\end{column}
+		
+		\begin{column}{0.5\textwidth}
+			\textbf{Dynamics:}
+			\begin{align}
+				\dot{x} &= v \cos(\theta) \\
+				\dot{y} &= v \sin(\theta) \\
+				\dot{\theta} &= \omega
+			\end{align}
+		\end{column}
+	\end{columns}
+	
+	\vspace{0.3cm}
+	\textbf{Physical Constraints:}
+	\begin{itemize}
+		\item Velocity: $0 \leq v \leq 0.5$ m/s, $|\omega| \leq 1.5$ rad/s
+		\item Acceleration: $|\dot{v}| \leq 0.5$ m/s$^2$, $|\dot{\omega}| \leq 2.0$ rad/s$^2$
+	\end{itemize}
+\end{frame}
+
+% LIDAR Detection Slide
+\begin{frame}{Implementation: LIDAR-Based Obstacle Detection}
+	\begin{block}{360° LIDAR Simulation}
+		\begin{itemize}
+			\item 360 rays at 1° angular resolution
+			\item Each ray checks intersection with all obstacles
+			\item Proper occlusion handling (ray stops at first hit)
+			\item Returns \textbf{surface points}, not obstacle centers
+		\end{itemize}
+	\end{block}
+	
+	\textbf{Obstacle Types:}
+	\begin{itemize}
+		\item \textbf{Circles}: Solve quadratic equation for ray-circle intersection
+		\item \textbf{Rectangles}: Check ray-line segment intersection for four edges
+		\item \textbf{Other robots}: Detected as circular obstacles
+	\end{itemize}
+	
+	\begin{block}{Clustering (Optional)}
+		Can group consecutive LIDAR detections (within 0.3m) into clusters to identify separate objects and distinguish between static obstacles and other robots.
+	\end{block}
+\end{frame}
+
+% CBF Formulation Slide
+\begin{frame}{CBF Formulation}
+	\textbf{For closest detected surface point} $\mathbf{p}_{\text{obs}}$:
+	
+	\begin{block}{Barrier Function}
+		\begin{equation}
+			h(\mathbf{x}) = \|\mathbf{p}_{\text{robot}} - \mathbf{p}_{\text{obs}}\|^2 - (R_{\text{robot}} + \text{buffer})^2
+		\end{equation}
+	\end{block}
+	
+	\textbf{Safety buffers:}
+	\begin{itemize}
+		\item Static obstacles: $\text{buffer} = 0.03$ m
+		\item Other robots (normal): $\text{buffer} = 0.0$ m
+		\item Other robots (low priority): $\text{buffer} = -0.05$ m
+	\end{itemize}
+	
+	\begin{block}{Time Derivative}
+		\begin{equation}
+			\dot{h} = 2(\mathbf{p}_{\text{robot}} - \mathbf{p}_{\text{obs}})^T \cdot \dot{\mathbf{p}}_{\text{robot}} = 2(dx \cdot v\cos\theta + dy \cdot v\sin\theta)
+		\end{equation}
+		where $(dx, dy) = \mathbf{p}_{\text{robot}} - \mathbf{p}_{\text{obs}}$
+	\end{block}
+	
+	\textbf{CBF constraint:} $\dot{h} + \gamma h \geq 0$ with $\gamma = 2.0$
+\end{frame}
+
+% QP Controller Slide
+\begin{frame}{Quadratic Programming Controller}
+	At each timestep, solve:
+	
+	\begin{equation}
+		\begin{aligned}
+			\min_{\mathbf{u}} \quad & \|\mathbf{u} - \mathbf{u}_{\text{des}}\|^2 \\
+			\text{s.t.} \quad & \dot{h} + \gamma h \geq 0 \\
+			& v_{\min} \leq v \leq v_{\max} \\
+			& \omega_{\min} \leq \omega \leq \omega_{\max}
+		\end{aligned}
+	\end{equation}
+	
+	\textbf{Acceleration bounds:}
+	\begin{align}
+		v_{\min} &= \max(0, v_{\text{prev}} - a_{\max} \cdot dt) \\
+		v_{\max} &= \min(v_{\max}, v_{\text{prev}} + a_{\max} \cdot dt) \\
+		\omega_{\min} &= \max(-\omega_{\max}, \omega_{\text{prev}} - \alpha_{\max} \cdot dt) \\
+		\omega_{\max} &= \min(\omega_{\max}, \omega_{\text{prev}} + \alpha_{\max} \cdot dt)
+	\end{align}
+\end{frame}
+
+% Nominal Controller Slide
+\begin{frame}{Nominal Controller}
+	\textbf{Goal:} Drive robot to target position $\mathbf{g} = (g_x, g_y)$
+	
+	\begin{block}{Proportional Control}
+		\textbf{Linear velocity:}
+		\begin{equation}
+			v_{\text{des}} = \min(v_{\max}, 0.5 \cdot \|\mathbf{p}_{\text{robot}} - \mathbf{g}\|)
+		\end{equation}
+		
+		\textbf{Angular velocity:}
+		\begin{equation}
+			\omega_{\text{des}} = 3.0 \cdot \text{atan2}(\sin(\theta_{\text{goal}} - \theta), \cos(\theta_{\text{goal}} - \theta))
+		\end{equation}
+		where $\theta_{\text{goal}} = \text{atan2}(g_y - y, g_x - x)$
+	\end{block}
+	
+	\textbf{Behavior:}
+	\begin{itemize}
+		\item Slows down as approaching goal (prevents overshoot)
+		\item Turns proportionally to heading error
+		\item Provides desired control $\mathbf{u}_{\text{des}}$ for QP
+	\end{itemize}
+\end{frame}
+
+% Objective Function Slide
+\begin{frame}{QP Objective Function}
+	\textbf{Standard case} (not heading directly toward obstacle):
+	\begin{equation}
+		J(\mathbf{u}) = (v - v_{\text{des}})^2 + 0.5(\omega - \omega_{\text{des}})^2
+	\end{equation}
+	
+	\textbf{Obstacle avoidance mode} (when $|\text{angle\_diff}| < 60°$ and $h < 1.0$):
+	\begin{equation}
+		J(\mathbf{u}) = \begin{cases}
+			8.0 v^2 + 0.5(\omega - \omega_{\text{target}})^2 & \text{if } h < 0.3 \\
+			4.0 v^2 + 0.5(\omega - \omega_{\text{target}})^2 & \text{if } 0.3 \leq h < 0.6 \\
+			2.0(v - v_{\text{des}})^2 + 0.5(\omega - \omega_{\text{target}})^2 & \text{if } h \geq 0.6
+		\end{cases}
+	\end{equation}
+	
+	where $\omega_{\text{target}}$ encourages turning away from obstacle.
+\end{frame}
+
+% Multi-Robot Coordination Slide
+\begin{frame}{Multi-Robot Coordination: Priority System}
+	\textbf{Challenge:} Symmetric avoidance can cause deadlocks
+	
+	\textbf{Solution:} Priority based on proximity to static obstacles
+	
+	\begin{block}{Priority Determination}
+		For each robot, compute $h_{\text{static}}$ = distance to nearest static obstacle
+		
+		Robot with smaller $h_{\text{static}}$ gets priority (closer to static obstacle = more constrained)
+	\end{block}
+	
+	\begin{block}{Differential Safety Buffers}
+		\begin{itemize}
+			\item \textbf{Priority robot}: Treats other robot with buffer = $-0.05$ m
+			\begin{itemize}
+				\item Can approach closer, effectively "pushing"
+			\end{itemize}
+			\item \textbf{Non-priority robot}: Treats other robot with buffer = $0.0$ m
+			\begin{itemize}
+				\item Normal avoidance, yields to priority robot
+			\end{itemize}
+		\end{itemize}
+	\end{block}
+	
+	\textbf{Result:} Asymmetric interaction breaks deadlocks and creates natural yielding behavior
+\end{frame}
+
+% Emergency Recovery Slide
+\begin{frame}{Emergency Recovery: QP Failure Handling}
+	\textbf{When does QP fail?}
+	\begin{itemize}
+		\item Constraint becomes infeasible (no valid velocities satisfy safety)
+		\item Typically when $h \approx 0$ and robot has forward momentum
+	\end{itemize}
+	
+	\begin{block}{Smart Recovery Strategy}
+		\begin{enumerate}
+			\item Test both turn directions: compute $\dot{h}$ for $\omega = \pm 0.8\omega_{\max}$
+			\item Choose direction with larger $\dot{h}$ (increases safety margin faster)
+			\item Check if small forward velocity ($v = 0.05$ m/s) is safe
+			\item If safe: turn while moving forward
+			\item Else: pure rotation ($v = 0$)
+		\end{enumerate}
+	\end{block}
+	
+	\textbf{Advantage:} Escapes dangerous situations faster than pure rotation
+\end{frame}
+
+% Discrete-Time Considerations Slide
+\begin{frame}{Discrete-Time Implementation}
+	\textbf{Challenge:} Continuous-time CBF guarantee doesn't hold perfectly in discrete time
+	
+	\begin{block}{Integration Error}
+		With Euler integration and timestep $dt = 0.05$ s:
+		\begin{itemize}
+			\item Robot can overshoot by $\approx 0.5 a_{\max} dt^2$
+			\item This can cause $h$ to become negative despite satisfying constraint
+		\end{itemize}
+	\end{block}
+	
+	\begin{block}{Compensation}
+		Add small margin to constraint:
+		\begin{equation}
+			\dot{h} + \gamma(h - \varepsilon) \geq 0
+		\end{equation}
+		where $\varepsilon = 0.5 a_{\max} dt^2 \approx 0.000625$ m$^2$
+	\end{block}
+	
+	\textbf{Result:} Accounts for discrete-time effects while minimally affecting behavior
+\end{frame}
+
+% Implementation Summary Slide
+\begin{frame}{Implementation Summary}
+	\textbf{Algorithm Pipeline:}
+	\begin{enumerate}
+		\item \textbf{Sense}: LIDAR scan $\rightarrow$ detect obstacle surfaces
+		\item \textbf{Cluster}: Group detections $\rightarrow$ identify objects
+		\item \textbf{Compute}: Calculate $h$ for closest point
+		\item \textbf{Optimize}: Solve QP for safe control
+		\item \textbf{Execute}: Apply velocity commands
+		\item \textbf{Fallback}: If QP fails, use smart recovery
+	\end{enumerate}
+	
+	\vspace{0.3cm}
+	\textbf{Key Features:}
+	\begin{itemize}
+		\item Surface-based detection (not center-based)
+		\item Handles multiple obstacle types (circles, rectangles)
+		\item Dynamic obstacle avoidance (other robots)
+		\item Priority-based coordination
+		\item Robust emergency recovery
+	\end{itemize}
+\end{frame}
+	
+	
+	
+	
+	
+	
+\end{document}
