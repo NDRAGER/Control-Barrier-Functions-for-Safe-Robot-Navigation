@@ -1,0 +1,610 @@
+import numpy as np
+import matplotlib.pyplot as plt
+from matplotlib.patches import Circle
+from scipy.optimize import minimize
+
+
+class TurtleBot:
+    def __init__(self, x, y, theta):
+        self.x = x
+        self.y = y
+        self.theta = theta
+        self.radius = 0.2  # Robot radius
+        self.max_v = 0.5  # Max linear velocity (m/s)
+        self.max_w = 1.5  # Max angular velocity (rad/s)
+        self.max_a = 0.5  # Max linear acceleration (m/s^2)
+        self.max_alpha = 2.0  # Max angular acceleration (rad/s^2)
+
+        # Current velocities
+        self.v = 0.0
+        self.w = 0.0
+
+        # History storage
+        self.history = {
+            'x': [x],
+            'y': [y],
+            'theta': [theta],
+            'cbf_active': [False],
+            'h_values': [0.0],
+            'v': [0.0],
+            'w': [0.0],
+            'time': [0.0]
+        }
+
+    def apply_acceleration_limits(self, v_cmd, w_cmd, dt):
+        """Apply acceleration limits to commanded velocities"""
+        # Linear acceleration limit
+        dv = v_cmd - self.v
+        max_dv = self.max_a * dt
+        if abs(dv) > max_dv:
+            dv = np.sign(dv) * max_dv
+        v_limited = self.v + dv
+
+        # Angular acceleration limit
+        dw = w_cmd - self.w
+        max_dw = self.max_alpha * dt
+        if abs(dw) > max_dw:
+            dw = np.sign(dw) * max_dw
+        w_limited = self.w + dw
+
+        # Also enforce velocity limits
+        v_limited = np.clip(v_limited, 0, self.max_v)
+        w_limited = np.clip(w_limited, -self.max_w, self.max_w)
+
+        return v_limited, w_limited
+
+    def update(self, v_cmd, w_cmd, dt, time, cbf_active, h_value):
+        """Update robot state with velocity commands and log all data"""
+        # Apply acceleration limits
+        v_actual, w_actual = self.apply_acceleration_limits(v_cmd, w_cmd, dt)
+
+        # Update velocities
+        self.v = v_actual
+        self.w = w_actual
+
+        # Update position
+        self.x += self.v * np.cos(self.theta) * dt
+        self.y += self.v * np.sin(self.theta) * dt
+        self.theta += self.w * dt
+        self.theta = np.arctan2(np.sin(self.theta), np.cos(self.theta))  # Normalize
+
+        # Store everything together
+        self.history['x'].append(self.x)
+        self.history['y'].append(self.y)
+        self.history['theta'].append(self.theta)
+        self.history['v'].append(self.v)
+        self.history['w'].append(self.w)
+        self.history['time'].append(time)
+        self.history['cbf_active'].append(cbf_active)
+        self.history['h_values'].append(h_value)
+
+
+class CBFController:
+    def __init__(self, gamma=3.0, lidar_rays=72):
+        self.gamma = gamma
+        self.lidar_rays = lidar_rays  # Number of LIDAR rays (360°/lidar_rays = angular resolution)
+
+    def nominal_controller(self, robot, goal):
+        """Simple proportional controller to drive to goal"""
+        dx = goal[0] - robot.x
+        dy = goal[1] - robot.y
+
+        # Desired velocity
+        distance = np.sqrt(dx ** 2 + dy ** 2)
+        v_des = min(0.4, 0.5 * distance)
+
+        # Desired angular velocity (proportional to angle error)
+        angle_to_goal = np.arctan2(dy, dx)
+        angle_diff = np.arctan2(np.sin(angle_to_goal - robot.theta),
+                                np.cos(angle_to_goal - robot.theta))
+        w_des = 3.0 * angle_diff
+
+        return v_des, w_des
+
+    def lidar_scan(self, robot, obstacles, max_range=10.0):
+        """
+        Simulate 360° LIDAR scan around the robot.
+        Returns list of (angle, distance, hit_point) for rays that hit obstacles.
+        Properly handles occlusion - rays stop at the first obstacle they hit.
+        """
+        # Handle single obstacle (dict) or multiple obstacles (list)
+        if isinstance(obstacles, dict):
+            obstacles = [obstacles]
+
+        detections = []
+
+        for i in range(self.lidar_rays):
+            # Ray angle in global frame
+            ray_angle = 2 * np.pi * i / self.lidar_rays
+
+            # Ray direction
+            ray_dx = np.cos(ray_angle)
+            ray_dy = np.sin(ray_angle)
+
+            # Find the closest intersection across all obstacles
+            closest_hit = None
+            closest_distance = max_range
+
+            for obstacle in obstacles:
+                # Check intersection with this circular obstacle
+                # Vector from robot to obstacle center
+                to_obs_x = obstacle['x'] - robot.x
+                to_obs_y = obstacle['y'] - robot.y
+
+                # Quadratic equation coefficients: at² + bt + c = 0
+                a = ray_dx ** 2 + ray_dy ** 2  # = 1 for unit vector
+                b = -2 * (ray_dx * to_obs_x + ray_dy * to_obs_y)
+                c = to_obs_x ** 2 + to_obs_y ** 2 - obstacle['radius'] ** 2
+
+                discriminant = b ** 2 - 4 * a * c
+
+                if discriminant >= 0:
+                    # Ray hits this circle
+                    t1 = (-b - np.sqrt(discriminant)) / (2 * a)
+                    t2 = (-b + np.sqrt(discriminant)) / (2 * a)
+
+                    # Take the closest positive intersection (first hit)
+                    t = t1 if t1 > 0 else t2
+
+                    if t > 0 and t < closest_distance:
+                        # This is the closest hit so far
+                        closest_distance = t
+                        hit_x = robot.x + t * ray_dx
+                        hit_y = robot.y + t * ray_dy
+                        closest_hit = {
+                            'angle': ray_angle,
+                            'distance': t,
+                            'point': (hit_x, hit_y),
+                            'obstacle': obstacle
+                        }
+
+            # Add the closest hit (if any) to detections
+            if closest_hit is not None:
+                detections.append(closest_hit)
+
+        return detections
+
+    def cluster_detections(self, detections, cluster_distance=0.3):
+        """
+        Cluster LIDAR detections into separate objects.
+        Points within cluster_distance are considered part of the same object.
+        """
+        if not detections:
+            return []
+
+        # Sort detections by angle for sequential clustering
+        sorted_dets = sorted(detections, key=lambda d: d['angle'])
+
+        clusters = []
+        current_cluster = [sorted_dets[0]]
+
+        for i in range(1, len(sorted_dets)):
+            prev_point = current_cluster[-1]['point']
+            curr_point = sorted_dets[i]['point']
+
+            # Distance between consecutive detection points
+            dist = np.sqrt((curr_point[0] - prev_point[0]) ** 2 +
+                           (curr_point[1] - prev_point[1]) ** 2)
+
+            if dist <= cluster_distance:
+                # Same object
+                current_cluster.append(sorted_dets[i])
+            else:
+                # New object
+                clusters.append(current_cluster)
+                current_cluster = [sorted_dets[i]]
+
+        # Don't forget the last cluster
+        clusters.append(current_cluster)
+
+        # Check if first and last clusters should be merged (wrap-around at 0°/360°)
+        if len(clusters) > 1:
+            first_point = clusters[0][0]['point']
+            last_point = clusters[-1][-1]['point']
+            wrap_dist = np.sqrt((first_point[0] - last_point[0]) ** 2 +
+                                (first_point[1] - last_point[1]) ** 2)
+
+            if wrap_dist <= cluster_distance:
+                # Merge first and last clusters
+                clusters[0] = clusters[-1] + clusters[0]
+                clusters.pop()
+
+        return clusters
+
+    def find_closest_point_per_object(self, robot, clusters):
+        """
+        For each detected object (cluster), find the closest point to the robot.
+        Returns list of critical points, one per object.
+        """
+        critical_points = []
+
+        for cluster in clusters:
+            # Find closest point in this cluster
+            min_dist = float('inf')
+            closest_det = None
+
+            for det in cluster:
+                if det['distance'] < min_dist:
+                    min_dist = det['distance']
+                    closest_det = det
+
+            if closest_det:
+                # Weight by heading direction
+                angle_to_point = closest_det['angle']
+                angle_diff = np.arctan2(np.sin(angle_to_point - robot.theta),
+                                        np.cos(angle_to_point - robot.theta))
+
+                # Forward weight: more weight for points ahead
+                forward_weight = max(0.2, np.cos(angle_diff))
+
+                critical_points.append({
+                    'point': closest_det['point'],
+                    'distance': closest_det['distance'],
+                    'angle': closest_det['angle'],
+                    'weight': forward_weight,
+                    'cluster_size': len(cluster)
+                })
+
+        return critical_points
+
+    def compute_cbf_all_obstacles(self, robot, obstacles):
+        """
+        Compute CBF considering all obstacles.
+        Performs LIDAR scan that detects all obstacles with proper occlusion.
+        """
+        # Scan all obstacles (with occlusion handling built-in)
+        all_detections = self.lidar_scan(robot, obstacles)
+
+        if not all_detections:
+            # No detections, return safe value
+            return 10.0, 0.0, 0.0, []
+
+        # Cluster all detections into separate objects
+        clusters = self.cluster_detections(all_detections, cluster_distance=0.3)
+
+        # Get closest point from each object
+        critical_points = self.find_closest_point_per_object(robot, clusters)
+
+        # Find the most threatening critical point
+        min_weighted_dist = float('inf')
+        most_critical = None
+
+        for cp in critical_points:
+            weighted_dist = cp['distance'] / cp['weight']
+            if weighted_dist < min_weighted_dist:
+                min_weighted_dist = weighted_dist
+                most_critical = cp
+
+        if most_critical:
+            obs_x, obs_y = most_critical['point']
+            dx = robot.x - obs_x
+            dy = robot.y - obs_y
+            dist_sq = dx ** 2 + dy ** 2
+            h = dist_sq - robot.radius ** 2
+        else:
+            # Fallback
+            h = 10.0
+            dx = 0.0
+            dy = 0.0
+
+        # Store for visualization
+        self.last_clusters = clusters
+        self.last_critical_points = critical_points
+        self.last_detections = all_detections
+
+        return h, dx, dy, all_detections
+
+    def compute_cbf(self, robot, obstacle):
+        """
+        Compute CBF value using LIDAR-based surface detection for a single obstacle.
+        (Kept for backward compatibility)
+        """
+        return self.compute_cbf_all_obstacles(robot, [obstacle])
+
+    def compute_cbf_derivative(self, robot, obstacle, dx, dy, v, w):
+        """
+        Compute CBF time derivative
+        h(x) = ||p_robot - p_surface||^2 - R_robot^2
+        h_dot = 2*(p_robot - p_surface)^T * p_robot_dot
+        Note: obstacle parameter is not used (kept for compatibility),
+        dx and dy are computed from the critical point
+        """
+        h_dot = 2 * (dx * v * np.cos(robot.theta) + dy * v * np.sin(robot.theta))
+        return h_dot
+
+    def safe_controller(self, robot, goal, obstacles):
+        """CBF-based QP controller with 360° LIDAR awareness for multiple obstacles"""
+        v_des, w_des = self.nominal_controller(robot, goal)
+
+        # Handle both single obstacle (dict) and multiple obstacles (list)
+        if isinstance(obstacles, dict):
+            obstacles = [obstacles]
+
+        # Compute CBF value using LIDAR-based surface detection for all obstacles
+        h, dx, dy, detections = self.compute_cbf_all_obstacles(robot, obstacles)
+
+        # Store detections for visualization
+        self.last_detections = detections
+
+        # Only activate CBF if close to any obstacle
+        if h > 2.0:
+            return v_des, w_des, False  # Not close, use nominal control
+
+        # Check if we're heading toward the critical obstacle
+        angle_to_obs = np.arctan2(-dy, -dx)
+        angle_diff = np.arctan2(np.sin(angle_to_obs - robot.theta),
+                                np.cos(angle_to_obs - robot.theta))
+
+        # Calculate angle to goal
+        dx_goal = goal[0] - robot.x
+        dy_goal = goal[1] - robot.y
+        angle_to_goal = np.arctan2(dy_goal, dx_goal)
+        angle_to_goal_diff = np.arctan2(np.sin(angle_to_goal - robot.theta),
+                                        np.cos(angle_to_goal - robot.theta))
+
+        # Determine turn bias (which direction to turn)
+        # This is computed regardless of whether we're heading toward obstacle
+        if abs(angle_to_goal_diff) < np.pi / 4:
+            # Goal is roughly ahead - turn away from obstacle
+            turn_bias = -np.sign(angle_diff) if angle_diff != 0 else 1.0
+        else:
+            # Goal is to the side - turn toward goal
+            turn_bias = np.sign(angle_to_goal_diff)
+
+        # If pointing toward obstacle and close, we need to turn
+        heading_toward_obstacle = abs(angle_diff) < np.pi / 3 and h < 1.0
+
+        if heading_toward_obstacle:
+            # Use the turn_bias we already calculated above
+
+            def objective(u):
+                v, w = u
+                # Moderate penalty on forward velocity (reduced from 10.0 to 5.0)
+                if h < 0.3:
+                    v_penalty = 8.0 * v ** 2  # Very close - strong stop
+                elif h < 0.6:
+                    v_penalty = 4.0 * v ** 2  # Close - moderate stop
+                else:
+                    v_penalty = 2.0 * (v - v_des) ** 2  # Not too close - gentle slowdown
+
+                # Encourage turning, but less aggressively (0.5 instead of 0.7)
+                w_target = turn_bias * robot.max_w * 0.5
+                w_penalty = (w - w_target) ** 2
+
+                return v_penalty + 0.5 * w_penalty
+        else:
+            # Normal QP objective - just stay close to desired
+            def objective(u):
+                v, w = u
+                return (v - v_des) ** 2 + 0.5 * (w - w_des) ** 2
+
+        # Constraint function uses the dx, dy from the critical point
+        def constraint(u):
+            v, w = u
+            h_dot = self.compute_cbf_derivative(robot, None, dx, dy, v, w)
+            return h_dot + self.gamma * h
+
+        bounds = [(0, robot.max_v), (-robot.max_w, robot.max_w)]
+        cons = {'type': 'ineq', 'fun': constraint}
+
+        # Initial guess: bias toward solution
+        if heading_toward_obstacle:
+            turn_direction = turn_bias
+            initial_guess = [0.2, turn_direction * robot.max_w * 0.4]
+        else:
+            initial_guess = [v_des, w_des]
+
+        result = minimize(
+            objective,
+            initial_guess,
+            method='SLSQP',
+            bounds=bounds,
+            constraints=cons,
+            options={'maxiter': 100, 'ftol': 1e-6}
+        )
+
+        if result.success:
+            return result.x[0], result.x[1], True
+        else:
+            # Emergency: turn toward goal if possible, otherwise away from obstacle
+            turn_direction = turn_bias
+            print(f"QP failed at h={h:.3f}, turning")
+            return 0.0, turn_direction * robot.max_w * 0.5, True
+
+
+def run_simulation():
+    # Initialize robot
+    robot = TurtleBot(0.0, 0.0, 0.0)
+    goal = np.array([5.0, 3.0])
+
+    # Multiple obstacles - creating a narrow passage
+    obstacles = [
+        {'x': 2.2, 'y': 1.7, 'radius': 0.5},  # Original obstacle
+        {'x': 1.5, 'y': 0.5, 'radius': 0.4}  # New obstacle bottom-left
+    ]
+
+    # Simulation parameters
+    dt = 0.05
+    max_time = 60.0
+    time = 0.0
+
+    controller = CBFController(gamma=3.0, lidar_rays=72)
+
+    # Run simulation
+    print("Starting simulation...")
+    print(f"Robot max acceleration: {robot.max_a} m/s²")
+    print(f"Robot max angular acceleration: {robot.max_alpha} rad/s²")
+    print(f"Number of obstacles: {len(obstacles)}")
+
+    while time < max_time:
+        # Check if goal reached
+        dist_to_goal = np.sqrt((robot.x - goal[0]) ** 2 + (robot.y - goal[1]) ** 2)
+        if dist_to_goal < 0.15:
+            print(f"Goal reached at t={time:.2f}s")
+            break
+
+        # Compute safe control considering all obstacles
+        v, w, cbf_active = controller.safe_controller(robot, goal, obstacles)
+
+        # Compute CBF value for logging (using most critical obstacle)
+        h, _, _, _ = controller.compute_cbf_all_obstacles(robot, obstacles)
+
+        # Update robot with all data at once
+        robot.update(v, w, dt, time, cbf_active, h)
+
+        time += dt
+
+    print(f"Simulation completed at t={time:.2f}s")
+    print(f"Minimum CBF value: {min(robot.history['h_values']):.3f}")
+
+    return robot, obstacles, goal, controller
+
+
+# Run simulation
+robot, obstacles, goal, controller = run_simulation()
+
+# Get trajectory from robot's history
+trajectory = robot.history
+
+# Create figure with four subplots
+fig = plt.figure(figsize=(16, 10))
+
+# Top left: Trajectory
+ax1 = fig.add_subplot(221)
+ax1.set_xlim(-0.5, 6)
+ax1.set_ylim(-0.5, 4)
+ax1.set_aspect('equal')
+ax1.grid(True, alpha=0.3)
+ax1.set_xlabel('X (m)', fontsize=12)
+ax1.set_ylabel('Y (m)', fontsize=12)
+ax1.set_title('TurtleBot Trajectory with CBF Safety', fontsize=14, fontweight='bold')
+
+# Plot all obstacles
+for i, obstacle in enumerate(obstacles):
+    circle = Circle((obstacle['x'], obstacle['y']), obstacle['radius'],
+                    color='red', alpha=0.7, label='Obstacle' if i == 0 else '')
+    ax1.add_patch(circle)
+
+    # Safety boundary
+    safety_circle = Circle((obstacle['x'], obstacle['y']),
+                           obstacle['radius'] + robot.radius,
+                           color='orange', alpha=0.15, linestyle=':',
+                           fill=False, linewidth=2,
+                           label='Robot Safety Radius' if i == 0 else '')
+    ax1.add_patch(safety_circle)
+
+# Color trajectory by CBF activation
+for i in range(len(trajectory['x']) - 1):
+    color = 'orange' if trajectory['cbf_active'][i] else 'blue'
+    ax1.plot(trajectory['x'][i:i + 2], trajectory['y'][i:i + 2],
+             color=color, linewidth=2, alpha=0.8)
+
+# Add legend elements
+ax1.plot([], [], 'b-', linewidth=2, label='Nominal Control')
+ax1.plot([], [], color='orange', linewidth=2, label='CBF Active')
+
+# Plot goal
+ax1.plot(goal[0], goal[1], 'g*', markersize=20, label='Goal')
+
+# Plot start and end positions
+ax1.plot(trajectory['x'][0], trajectory['y'][0], 'go', markersize=12, label='Start')
+ax1.plot(trajectory['x'][-1], trajectory['y'][-1], 'gs', markersize=12, label='End')
+
+# Plot robot orientation at intervals
+step = max(1, len(trajectory['x']) // 20)
+for i in range(0, len(trajectory['x']), step):
+    x, y, theta = trajectory['x'][i], trajectory['y'][i], trajectory['theta'][i]
+    dx = 0.25 * np.cos(theta)
+    dy = 0.25 * np.sin(theta)
+    ax1.arrow(x, y, dx, dy, head_width=0.12, head_length=0.08,
+              fc='darkblue', ec='darkblue', alpha=0.6)
+
+# Visualize LIDAR detections at final position (if available)
+if hasattr(controller, 'last_detections') and controller.last_detections:
+    # Draw all LIDAR rays
+    for det in controller.last_detections:
+        hit_x, hit_y = det['point']
+        ax1.plot([robot.x, hit_x], [robot.y, hit_y], 'g-', alpha=0.2, linewidth=0.5)
+        ax1.plot(hit_x, hit_y, 'go', markersize=2, alpha=0.4)
+
+    # Highlight critical points (one per detected object)
+    if hasattr(controller, 'last_critical_points'):
+        for i, cp in enumerate(controller.last_critical_points):
+            cp_x, cp_y = cp['point']
+            ax1.plot(cp_x, cp_y, 'ro', markersize=6, alpha=0.8,
+                     label=f'Critical Point (Obj {i + 1})' if i == 0 else '')
+            ax1.plot([robot.x, cp_x], [robot.y, cp_y], 'r-',
+                     linewidth=2, alpha=0.6)
+
+ax1.legend(loc='upper left', fontsize=9)
+
+# Top right: CBF value over time
+ax2 = fig.add_subplot(222)
+time_array = np.array(trajectory['time'])
+ax2.plot(time_array, trajectory['h_values'], 'b-', linewidth=2, label='h(x)')
+ax2.axhline(y=0, color='r', linestyle='--', linewidth=2, label='Safety Boundary (h=0)')
+ax2.fill_between(time_array, -1, 0, alpha=0.2, color='red', label='Unsafe Region')
+ax2.grid(True, alpha=0.3)
+ax2.set_xlabel('Time (s)', fontsize=12)
+ax2.set_ylabel('CBF Value h(x)', fontsize=12)
+ax2.set_title('Control Barrier Function Over Time', fontsize=14, fontweight='bold')
+ax2.legend(loc='upper right', fontsize=10)
+ax2.set_ylim(-0.5, max(trajectory['h_values']) + 0.5)
+
+# Bottom left: Linear velocity over time
+ax3 = fig.add_subplot(223)
+ax3.plot(time_array, trajectory['v'], 'g-', linewidth=2, label='Linear velocity (v)')
+ax3.axhline(y=robot.max_v, color='r', linestyle='--', linewidth=1, alpha=0.5, label='Max velocity')
+ax3.grid(True, alpha=0.3)
+ax3.set_xlabel('Time (s)', fontsize=12)
+ax3.set_ylabel('Linear Velocity (m/s)', fontsize=12)
+ax3.set_title('Linear Velocity Over Time', fontsize=14, fontweight='bold')
+ax3.legend(loc='upper right', fontsize=10)
+ax3.set_ylim(-0.1, robot.max_v + 0.1)
+
+# Highlight when CBF is active
+for i in range(len(time_array) - 1):
+    if trajectory['cbf_active'][i]:
+        ax3.axvspan(time_array[i], time_array[i + 1], alpha=0.2, color='orange')
+
+# Bottom right: Angular velocity over time
+ax4 = fig.add_subplot(224)
+ax4.plot(time_array, trajectory['w'], 'purple', linewidth=2, label='Angular velocity (w)')
+ax4.axhline(y=robot.max_w, color='r', linestyle='--', linewidth=1, alpha=0.5, label='Max velocity')
+ax4.axhline(y=-robot.max_w, color='r', linestyle='--', linewidth=1, alpha=0.5)
+ax4.axhline(y=0, color='k', linestyle='-', linewidth=0.5, alpha=0.3)
+ax4.grid(True, alpha=0.3)
+ax4.set_xlabel('Time (s)', fontsize=12)
+ax4.set_ylabel('Angular Velocity (rad/s)', fontsize=12)
+ax4.set_title('Angular Velocity Over Time', fontsize=14, fontweight='bold')
+ax4.legend(loc='upper right', fontsize=10)
+ax4.set_ylim(-robot.max_w - 0.2, robot.max_w + 0.2)
+
+# Highlight when CBF is active
+for i in range(len(time_array) - 1):
+    if trajectory['cbf_active'][i]:
+        ax4.axvspan(time_array[i], time_array[i + 1], alpha=0.2, color='orange')
+
+plt.tight_layout()
+plt.show()
+
+print(f"\n{'=' * 50}")
+print(f"SIMULATION RESULTS")
+print(f"{'=' * 50}")
+print(f"Total trajectory points: {len(trajectory['x'])}")
+print(f"Start position: ({trajectory['x'][0]:.2f}, {trajectory['y'][0]:.2f})")
+print(f"End position: ({trajectory['x'][-1]:.2f}, {trajectory['y'][-1]:.2f})")
+print(f"Goal position: ({goal[0]:.2f}, {goal[1]:.2f})")
+print(f"Minimum CBF value (h_min): {min(trajectory['h_values']):.4f}")
+print(f"Safety maintained: {min(trajectory['h_values']) >= 0}")
+print(f"CBF was active for {sum(trajectory['cbf_active'])} time steps")
+print(f"Robot traveled from history: {len(robot.history['x'])} points")
+print(f"Average linear velocity: {np.mean(trajectory['v']):.3f} m/s")
+print(f"Max linear velocity: {np.max(trajectory['v']):.3f} m/s")
+print(f"Min linear velocity: {np.min(trajectory['v']):.3f} m/s")
+print(f"Average angular velocity magnitude: {np.mean(np.abs(trajectory['w'])):.3f} rad/s")
+if hasattr(controller, 'last_clusters'):
+    print(f"Number of detected objects at end: {len(controller.last_clusters)}")
+    for i, cluster in enumerate(controller.last_clusters):
+        print(f"  Object {i + 1}: {len(cluster)} LIDAR points")
+print(f"{'=' * 50}")
