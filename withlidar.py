@@ -57,7 +57,7 @@ class TurtleBot:
 class CBFController:
     def __init__(self, gamma=3.0, lidar_rays=72):
         self.gamma = gamma
-        self.lidar_rays = lidar_rays  # Number of LIDAR rays (360°/lidar_rays = angular resolution)
+        self.lidar_rays = lidar_rays
 
     def nominal_controller(self, robot, goal):
         """Simple proportional controller to drive to goal"""
@@ -139,132 +139,43 @@ class CBFController:
 
         return detections
 
-    def cluster_detections(self, detections, cluster_distance=0.3):
-        """
-        Cluster LIDAR detections into separate objects.
-        Points within cluster_distance are considered part of the same object.
-        """
-        if not detections:
-            return []
-
-        # Sort detections by angle for sequential clustering
-        sorted_dets = sorted(detections, key=lambda d: d['angle'])
-
-        clusters = []
-        current_cluster = [sorted_dets[0]]
-
-        for i in range(1, len(sorted_dets)):
-            prev_point = current_cluster[-1]['point']
-            curr_point = sorted_dets[i]['point']
-
-            # Distance between consecutive detection points
-            dist = np.sqrt((curr_point[0] - prev_point[0]) ** 2 +
-                           (curr_point[1] - prev_point[1]) ** 2)
-
-            if dist <= cluster_distance:
-                # Same object
-                current_cluster.append(sorted_dets[i])
-            else:
-                # New object
-                clusters.append(current_cluster)
-                current_cluster = [sorted_dets[i]]
-
-        # Don't forget the last cluster
-        clusters.append(current_cluster)
-
-        # Check if first and last clusters should be merged (wrap-around at 0°/360°)
-        if len(clusters) > 1:
-            first_point = clusters[0][0]['point']
-            last_point = clusters[-1][-1]['point']
-            wrap_dist = np.sqrt((first_point[0] - last_point[0]) ** 2 +
-                                (first_point[1] - last_point[1]) ** 2)
-
-            if wrap_dist <= cluster_distance:
-                # Merge first and last clusters
-                clusters[0] = clusters[-1] + clusters[0]
-                clusters.pop()
-
-        return clusters
-
-    def find_critical_points(self, robot, clusters, num_points=5):
-        """
-        For each detected object (cluster), find multiple critical points.
-        Returns list of critical points for multi-point CBF.
-        """
-        critical_points = []
-
-        for cluster in clusters:
-            # Sort detections in this cluster by distance
-            sorted_cluster = sorted(cluster, key=lambda d: d['distance'])
-
-            # Take up to num_points closest detections from this cluster
-            num_to_take = min(num_points, len(sorted_cluster))
-
-            for i in range(num_to_take):
-                det = sorted_cluster[i]
-
-                # Weight by heading direction
-                angle_to_point = det['angle']
-                angle_diff = np.arctan2(np.sin(angle_to_point - robot.theta),
-                                        np.cos(angle_to_point - robot.theta))
-
-                # Forward weight: more weight for points ahead
-                forward_weight = max(0.2, np.cos(angle_diff))
-
-                critical_points.append({
-                    'point': det['point'],
-                    'distance': det['distance'],
-                    'angle': det['angle'],
-                    'weight': forward_weight,
-                    'cluster_id': clusters.index(cluster)
-                })
-
-        return critical_points
-
     def compute_cbf_all_obstacles(self, robot, obstacles):
         """
         Compute CBF considering all obstacles.
         Performs LIDAR scan that detects all obstacles with proper occlusion.
-        Returns the minimum h value and all critical points for multi-point CBF.
+        Returns the minimum h value and the most critical point.
         """
         # Scan all obstacles (with occlusion handling built-in)
         all_detections = self.lidar_scan(robot, obstacles)
 
         if not all_detections:
             # No detections, return safe value
-            return 10.0, [], all_detections
+            return 10.0, None, all_detections
 
-        # Cluster all detections into separate objects
-        clusters = self.cluster_detections(all_detections, cluster_distance=0.3)
+        # Find the single closest detection point across ALL obstacles
+        closest_detection = min(all_detections, key=lambda d: d['distance'])
 
-        # Get multiple critical points from each object
-        critical_points = self.find_critical_points(robot, clusters, num_points=5)
+        obs_x, obs_y = closest_detection['point']
+        dx = robot.x - obs_x
+        dy = robot.y - obs_y
+        dist_sq = dx ** 2 + dy ** 2
+        safety_buffer = 0.05  # 5cm extra margin
+        h = dist_sq - (robot.radius + safety_buffer) ** 2
 
-        # Compute h for each critical point
-        h_values = []
-        for cp in critical_points:
-            obs_x, obs_y = cp['point']
-            dx = robot.x - obs_x
-            dy = robot.y - obs_y
-            dist_sq = dx ** 2 + dy ** 2
-            safety_buffer = 0.05  # 5cm extra margin
-            h = dist_sq - (robot.radius + safety_buffer) ** 2
-
-            # Store h value and gradient direction in the critical point
-            cp['h'] = h
-            cp['dx'] = dx
-            cp['dy'] = dy
-            h_values.append(h)
-
-        # Find minimum h (most critical)
-        min_h = min(h_values) if h_values else 10.0
+        # Create a single critical point dictionary
+        critical_point = {
+            'point': closest_detection['point'],
+            'distance': closest_detection['distance'],
+            'angle': closest_detection['angle'],
+            'h': h,
+            'dx': dx,
+            'dy': dy
+        }
 
         # Store for visualization
-        self.last_clusters = clusters
-        self.last_critical_points = critical_points
         self.last_detections = all_detections
 
-        return min_h, critical_points, all_detections
+        return h, critical_point, all_detections
 
     def compute_cbf_derivative(self, robot, dx, dy, v, w):
         """
@@ -276,15 +187,15 @@ class CBFController:
         return h_dot
 
     def safe_controller(self, robot, goal, obstacles):
-        """CBF-based QP controller with multi-point CBF constraints"""
+        """CBF-based QP controller with single closest point"""
         v_des, w_des = self.nominal_controller(robot, goal)
 
         # Handle both single obstacle (dict) and multiple obstacles (list)
         if isinstance(obstacles, dict):
             obstacles = [obstacles]
 
-        # Compute CBF values for all critical points
-        h_min, critical_points, detections = self.compute_cbf_all_obstacles(robot, obstacles)
+        # Compute CBF value for the single closest point
+        h_min, critical_point, detections = self.compute_cbf_all_obstacles(robot, obstacles)
 
         # Store detections for visualization
         self.last_detections = detections
@@ -293,11 +204,9 @@ class CBFController:
         if h_min > 2.0:
             return v_des, w_des, False  # Not close, use nominal control
 
-        # Find the most critical point for turn bias calculation
-        most_critical = min(critical_points, key=lambda cp: cp['h'])
-
-        dx = most_critical['dx']
-        dy = most_critical['dy']
+        # Get the critical point data
+        dx = critical_point['dx']
+        dy = critical_point['dy']
 
         # Check if we're heading toward the critical obstacle
         angle_to_obs = np.arctan2(-dy, -dx)
@@ -344,25 +253,13 @@ class CBFController:
                 v, w = u
                 return (v - v_des) ** 2 + 0.5 * (w - w_des) ** 2
 
-        # MULTI-POINT CBF CONSTRAINTS
-        # Create a constraint for each critical point
-        constraints = []
+        # SINGLE-POINT CBF CONSTRAINT
+        def constraint(u):
+            v, w = u
+            h_dot = self.compute_cbf_derivative(robot, dx, dy, v, w)
+            return h_dot + self.gamma * h_min
 
-        for cp in critical_points:
-            # Only constrain points that are relatively close
-            if cp['h'] < 2.0:
-                def make_constraint(cp_data):
-                    def constraint(u):
-                        v, w = u
-                        h_dot = self.compute_cbf_derivative(robot, cp_data['dx'], cp_data['dy'], v, w)
-                        return h_dot + self.gamma * cp_data['h']
-
-                    return constraint
-
-                constraints.append({
-                    'type': 'ineq',
-                    'fun': make_constraint(cp)
-                })
+        constraints = [{'type': 'ineq', 'fun': constraint}]
 
         # Velocity bounds with acceleration limits
         dt = 0.05
@@ -409,8 +306,8 @@ def run_simulation():
 
     # Multiple obstacles - creating a narrow passage
     obstacles = [
-        {'x': 2.2, 'y': 1.7, 'radius': 0.5},  # Original obstacle
-        {'x': 1.5, 'y': -0.2, 'radius': 0.4}  # New obstacle bottom-left
+        {'x': 2.2, 'y': 1.7, 'radius': 0.5},
+        {'x': 1.5, 'y': -0.2, 'radius': 0.4}
     ]
 
     # Simulation parameters
@@ -436,7 +333,7 @@ def run_simulation():
         # Compute safe control considering all obstacles
         v, w, cbf_active = controller.safe_controller(robot, goal, obstacles)
 
-        # Compute CBF value for logging (using most critical obstacle)
+        # Compute CBF value for logging
         h, _, _ = controller.compute_cbf_all_obstacles(robot, obstacles)
 
         # Update robot with all data at once
@@ -467,7 +364,7 @@ ax1.set_aspect('equal')
 ax1.grid(True, alpha=0.3)
 ax1.set_xlabel('X (m)', fontsize=12)
 ax1.set_ylabel('Y (m)', fontsize=12)
-ax1.set_title('TurtleBot Trajectory with Multi-Point CBF Safety', fontsize=14, fontweight='bold')
+ax1.set_title('TurtleBot Trajectory with Single-Point CBF Safety', fontsize=14, fontweight='bold')
 
 # Plot all obstacles
 for i, obstacle in enumerate(obstacles):
@@ -483,15 +380,8 @@ for i, obstacle in enumerate(obstacles):
                            label='Robot Safety Radius' if i == 0 else '')
     ax1.add_patch(safety_circle)
 
-# Color trajectory by CBF activation
-for i in range(len(trajectory['x']) - 1):
-    color = 'orange' if trajectory['cbf_active'][i] else 'blue'
-    ax1.plot(trajectory['x'][i:i + 2], trajectory['y'][i:i + 2],
-             color=color, linewidth=2, alpha=0.8)
-
-# Add legend elements
-ax1.plot([], [], 'b-', linewidth=2, label='Nominal Control')
-ax1.plot([], [], color='orange', linewidth=2, label='CBF Active')
+# Color trajectory
+ax1.plot(trajectory['x'], trajectory['y'], 'b-', linewidth=2, alpha=0.8, label='Trajectory')
 
 # Plot goal
 ax1.plot(goal[0], goal[1], 'g*', markersize=20, label='Goal')
@@ -509,7 +399,7 @@ for i in range(0, len(trajectory['x']), step):
     ax1.arrow(x, y, dx, dy, head_width=0.12, head_length=0.08,
               fc='darkblue', ec='darkblue', alpha=0.6)
 
-# Visualize LIDAR detections at final position (if available)
+# Visualize LIDAR detections at final position
 if hasattr(controller, 'last_detections') and controller.last_detections:
     # Draw all LIDAR rays
     for det in controller.last_detections:
@@ -517,21 +407,18 @@ if hasattr(controller, 'last_detections') and controller.last_detections:
         ax1.plot([robot.x, hit_x], [robot.y, hit_y], 'g-', alpha=0.2, linewidth=0.5)
         ax1.plot(hit_x, hit_y, 'go', markersize=2, alpha=0.4)
 
-    # Highlight critical points (multiple per detected object)
-    if hasattr(controller, 'last_critical_points'):
-        for i, cp in enumerate(controller.last_critical_points):
-            cp_x, cp_y = cp['point']
-            ax1.plot(cp_x, cp_y, 'ro', markersize=4, alpha=0.6)
-            if i < 3:  # Only draw lines for first 3 to avoid clutter
-                ax1.plot([robot.x, cp_x], [robot.y, cp_y], 'r-',
-                         linewidth=1, alpha=0.4)
+    # Highlight critical point (single closest point)
+    closest_det = min(controller.last_detections, key=lambda d: d['distance'])
+    cp_x, cp_y = closest_det['point']
+    ax1.plot(cp_x, cp_y, 'ro', markersize=8, alpha=0.8, label='Critical Point')
+    ax1.plot([robot.x, cp_x], [robot.y, cp_y], 'r-', linewidth=2, alpha=0.6)
 
 ax1.legend(loc='upper left', fontsize=9)
 
 # Top right: CBF value over time
 ax2 = fig.add_subplot(222)
 time_array = np.array(trajectory['time'])
-ax2.plot(time_array, trajectory['h_values'], 'b-', linewidth=2, label='h(x) minimum')
+ax2.plot(time_array, trajectory['h_values'], 'b-', linewidth=2, label='h(x)')
 ax2.axhline(y=0, color='r', linestyle='--', linewidth=2, label='Safety Boundary (h=0)')
 ax2.fill_between(time_array, -1, 0, alpha=0.2, color='red', label='Unsafe Region')
 ax2.grid(True, alpha=0.3)
@@ -552,11 +439,6 @@ ax3.set_title('Linear Velocity Over Time', fontsize=14, fontweight='bold')
 ax3.legend(loc='upper right', fontsize=10)
 ax3.set_ylim(-0.1, robot.max_v + 0.1)
 
-# Highlight when CBF is active
-for i in range(len(time_array) - 1):
-    if trajectory['cbf_active'][i]:
-        ax3.axvspan(time_array[i], time_array[i + 1], alpha=0.2, color='orange')
-
 # Bottom right: Angular velocity over time
 ax4 = fig.add_subplot(224)
 ax4.plot(time_array, trajectory['w'], 'purple', linewidth=2, label='Angular velocity (w)')
@@ -569,11 +451,6 @@ ax4.set_ylabel('Angular Velocity (rad/s)', fontsize=12)
 ax4.set_title('Angular Velocity Over Time', fontsize=14, fontweight='bold')
 ax4.legend(loc='upper right', fontsize=10)
 ax4.set_ylim(-robot.max_w - 0.2, robot.max_w + 0.2)
-
-# Highlight when CBF is active
-for i in range(len(time_array) - 1):
-    if trajectory['cbf_active'][i]:
-        ax4.axvspan(time_array[i], time_array[i + 1], alpha=0.2, color='orange')
 
 plt.tight_layout()
 plt.show()
@@ -593,10 +470,6 @@ print(f"Average linear velocity: {np.mean(trajectory['v']):.3f} m/s")
 print(f"Max linear velocity: {np.max(trajectory['v']):.3f} m/s")
 print(f"Min linear velocity: {np.min(trajectory['v']):.3f} m/s")
 print(f"Average angular velocity magnitude: {np.mean(np.abs(trajectory['w'])):.3f} rad/s")
-if hasattr(controller, 'last_clusters'):
-    print(f"Number of detected objects at end: {len(controller.last_clusters)}")
-    for i, cluster in enumerate(controller.last_clusters):
-        print(f"  Object {i + 1}: {len(cluster)} LIDAR points")
-if hasattr(controller, 'last_critical_points'):
-    print(f"Total critical points being tracked: {len(controller.last_critical_points)}")
+if hasattr(controller, 'last_detections') and controller.last_detections:
+    print(f"Total LIDAR detections at end: {len(controller.last_detections)}")
 print(f"{'=' * 50}")
