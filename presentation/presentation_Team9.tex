@@ -9,9 +9,8 @@
 \usepackage{tikz}
 \usetikzlibrary{shapes,arrows,positioning}
 
-\title{Control Barrier Functions for Safe Multi-Robot Navigation}
-\author{Satvik Tajane, Harsh Akabari, Nicolas Drager}
-
+\title{Efficient Safe Robot Navigation Using Control Barrier Functions}
+\author{Nicolas Drager, Satvik Tajane, Harsh Akabari}
 
 \setbeamertemplate{footline}
 {
@@ -31,68 +30,223 @@
 		\titlepage
 	\end{frame}
 	
-	% ========== TOC ==========
 	\begin{frame}{Outline}
 		\tableofcontents
 	\end{frame}
 	
 	% ========== INTRODUCTION ==========
 	\section{Introduction}
-	\begin{frame}{Introduction}
+	
+	\begin{frame}{Problem: Safe Navigation in Dynamic Environments}
+		\textbf{Safety is paramount in robotics}
 		\begin{itemize}
-			\item \textbf{Safety in robotics} varies by application domain
+			\item Primary concern: collision avoidance
+			\item But robots must also reach their goals efficiently
+		\end{itemize}
+		\textbf{ \(\implies \) avoid collisions but keep moving}
+		
+		\vspace{0.3cm}
+		\textbf{Application context:}
+		\begin{itemize}
+			\item Multi-robot warehouses: many robots, dynamic environment
+			\item High-speed operations require real-time safety guarantees
+		\end{itemize}
+	\end{frame}
+	
+	\begin{frame}{Solution: CBF as a Safety Filter}
+		\begin{block}{Core Idea}
+			Control Barrier Functions act as a \textbf{safety filter}:
 			\begin{itemize}
-				\item Manipulators, mobile platforms, drones, humanoids
+				\item Filters out unsafe commands
+				\item Minimally modifies safe ones for efficient avoidance in the future
 			\end{itemize}
-			\item Safety-critical systems require formal, mathematically-grounded frameworks
-			\item Control Barrier Functions (CBFs) provide systematic safety enforcement
-			\item Here we present:
-			\begin{itemize}
-				\item Theoretical foundations of CBFs
-				\item Practical implementation via quadratic programming (QP)
-				\item Application to robotic systems and human-robot collaboration
-			\end{itemize} 
-		\end{itemize}
-	\end{frame}
-	
-	% ========== WHAT ARE CBFS? ==========
-	\section{Control Barrier Functions: Theory}
-	
-	\begin{frame}{Control Barrier Functions: Definition}
-		Consider nonlinear control-affine system:
-		\[
-		\dot{x} = f(x) + g(x)u, \quad x \in \mathcal{D} \subset \mathbb{R}^n, \quad u \in U
-		\]
-		
-		\textbf{Safe set} $\mathcal{S} \subset \mathcal{D}$: forward invariant region.
-		
-		\begin{block}{Definition of CBF}
-			Function $h: \mathcal{D} \to \mathbb{R}$ is a \textbf{CBF} if:
-			\[
-			\sup_{u \in U} \left[ \frac{\partial h}{\partial x} f(x) + \frac{\partial h}{\partial x} g(x) u \right] \geq -\alpha(h(x))
-			\]
-			where $\alpha$ is extended class $\mathcal{K}$.
 		\end{block}
+		
+		\vspace{0.3cm}
+		\textbf{Our Approach:}
+		\begin{itemize}
+			\item Mathematical safety guarantees via CBF constraints
+			\item \textbf{Turn-first strategy}: prioritize turning over stopping
+			\begin{itemize}
+				\item Maintains forward momentum
+				\item Faster navigation through tight spaces
+			\end{itemize}
+			\item Priority-based multi-robot coordination
+		\end{itemize}
 	\end{frame}
 	
-	\begin{frame}{CBF-Based Safety Filter}
-		\begin{itemize}
-			\item CBF acts as \textbf{safety filter} on nominal controller
-			\item Minimally invasive: modifies control only when necessary
-			\item Implemented via Quadratic Programming (QP):
-			\[
-			u^* = \arg\min_{u \in U} \|u - u_{\text{des}}\|^2
-			\]
-			subject to:
-			\[
-			L_f h(x) + L_g h(x) u \geq -\alpha(h(x))
-			\]
-		\end{itemize}
+	% ========== ALGORITHM ==========
+	\section{Algorithm}
+	
+	\begin{frame}{Control Barrier Functions: Core Concept}
+		\begin{block}{Safety Definition}
+			CBF $h(\mathbf{x})$ defines safe region: $\mathcal{C} = \{\mathbf{x} \mid h(\mathbf{x}) \geq 0\}$
+		\end{block}
+		
+		\begin{block}{Safety Constraint}
+			If control $\mathbf{u}$ satisfies:
+			\begin{equation}
+				\dot{h}(\mathbf{x}, \mathbf{u}) + \gamma h(\mathbf{x}) \geq 0, \quad \gamma > 0
+			\end{equation}
+			then system remains safe: $h(\mathbf{x}) \geq 0$ for all time
+		\end{block}
 		
 	\end{frame}
-	\begin{frame}{Our Project: Multi-Robot CBF}
+	
+	\begin{frame}{Simulated Robot Dynamics \& Constraints}
+		\textbf{Differential drive robot modeled as unicycle:}
+		\begin{equation}
+			\dot{x} = v \cos\theta, \quad \dot{y} = v \sin\theta, \quad \dot{\theta} = \omega
+		\end{equation}
+		
+		\textbf{Control Inputs:}
 		\begin{itemize}
-			\item CBF acts as \textbf{safety filter} on nominal controller
+			\item Linear velocity: $v$
+			\item Angular velocity: $\omega$
+		\end{itemize}
+
+		\textbf{Physical limits:}
+		\begin{itemize}
+			\item Velocity: $v \in [0, 0.5]$ m/s, $\omega \in [-1.5, 1.5]$ rad/s
+			\item Acceleration: $|\dot{v}| \leq 0.5$ m/s$^2$, $|\dot{\omega}| \leq 2.0$ rad/s$^2$
+			\item Robot radius: $R = 0.2$ m
+		\end{itemize}
+
+	\end{frame}
+	
+	\begin{frame}{LIDAR-Based Surface Detection and Distance Measurement}
+		\textbf{LIDAR} detects \textit{obstacle surfaces}
+		
+		\begin{itemize}
+			\item 360 rays at 1° resolution to detect surfaces and their distance to robot
+			\item Clustering (optional): group detections to identify objects
+		\end{itemize}
+		\vspace*{0.2cm}
+		
+		\textbf{For closest detected surface point} $\mathbf{p}_{\text{obs}}$:
+		\begin{block}{Barrier Function}
+			\begin{equation}
+				h(\mathbf{x}) = \|\mathbf{p}_{\text{robot}} - \mathbf{p}_{\text{obs}}\|^2 - (R_{\text{robot}} + \text{buffer})^2
+			\end{equation}
+		\end{block}
+		
+		\(\implies\)\textbf{Safety buffer} differs dependent on the detected object!
+		
+		\(\implies\)Allows the prioritization of objects, in our case fellow robots
+	\end{frame}
+	
+	
+	\begin{frame}{QP-Based Safe Controller}
+		\textbf{Optimization problem:}
+		\begin{equation}
+			\begin{aligned}
+				\min_{v, \omega} \quad & \|u - u_{\text{des}}\|^2 \\
+				\text{s.t.} \quad & \dot{h} + \gamma h \geq 0 \\
+				& v \in [v_{\text{prev}} - a_{\max}dt, v_{\text{prev}} + a_{\max}dt] \\
+				& \omega \in [\omega_{\text{prev}} - \alpha_{\max}dt, \omega_{\text{prev}} + \alpha_{\max}dt]
+			\end{aligned}
+		\end{equation}
+		
+		\textbf{Notice:}
+		\begin{itemize}
+			\item Finds control closest to desired while guaranteeing safety
+			\item Acceleration limits embedded in QP bounds (not post-processed)
+			\item $\gamma = 2.0$ balances safety and agility
 		\end{itemize}
 	\end{frame}
+	
+	\begin{frame}{Prioritizing Turning Over Stopping}
+		\textbf{Standard case} (not heading directly toward obstacle):
+		\begin{equation}
+			J(\mathbf{u}) = (v - v_{\text{des}})^2 + 0.5(\omega - \omega_{\text{des}})^2
+		\end{equation}
+		
+		\textbf{Obstacle avoidance mode} (when $|\text{angle\_diff}| < 60°$ and $h < 1.0$):
+		\begin{equation}
+			J(\mathbf{u}) = \begin{cases}
+				8.0 v^2 + 0.5(\omega - \omega_{\text{target}})^2 & \text{if } h < 0.3 \\
+				4.0 v^2 + 0.5(\omega - \omega_{\text{target}})^2 & \text{if } 0.3 \leq h < 0.6 \\
+				2.0(v - v_{\text{des}})^2 + 0.5(\omega - \omega_{\text{target}})^2 & \text{if } h \geq 0.6
+			\end{cases}
+		\end{equation}
+		
+		where $\omega_{\text{target}}$ encourages turning away from obstacle.
+		%\vspace{0.3cm}
+		%\textbf{Effect:}
+		%\begin{itemize}
+			%\item Encourages turning ($\omega_{\text{away}}$) to avoid obstacle
+			%\item Reduces speed only when very close
+			%\item Maintains momentum for efficient navigation
+		%\end{itemize}
+	\end{frame}
+	
+	\begin{frame}{Emergency Recovery}
+		\textbf{When QP fails} (constraint infeasible):
+		\begin{enumerate}
+			\item Test $\dot{h}$ for left/right turns
+			\item Choose direction maximizing $\dot{h}$
+			\item Try $v = 0.05$ m/s + turn (if safe)
+			\item Else: pure rotation $v = 0$
+		\end{enumerate}
+		
+		\vspace{0.3cm}
+		\textbf{Key:} Intelligent recovery maintains progress vs. static stopping
+	\end{frame}
+	
+	\begin{frame}{Multi-Robot Priority System}
+		\textbf{Problem:} Equal priorities $\rightarrow$ both robots stop/deadlock
+		
+		\textbf{Solution:} Dynamic priority based on context
+		\begin{itemize}
+			\item Robot closer to static obstacle gets priority
+			\item Priority robot: buffer = $-0.05$ m for other robots
+			\item Non-priority robot: buffer = $0$ m for other robots
+		\end{itemize}
+		
+		\vspace{0.3cm}
+		\textbf{Result:} Priority robot can "push" through, non-priority yields
+	\end{frame}
+	
+
+	
+	% ========== RESULTS ==========
+	\section{Experimental Results}
+	
+	\begin{frame}{Scenario 1: Single Robot with Rectangular Obstacle}
+		
+		\textbf{Observation:} LIDAR accurately detects corners, enables tight maneuvering
+	\end{frame}
+	
+
+
+	% ========== CONCLUSION ==========
+	\section{Conclusion}
+	
+	\begin{frame}{Contributions}
+		\begin{itemize}
+			\item \textbf{Turn-first strategy}: Maintains momentum while ensuring safety
+			\item \textbf{Priority system}: Resolves multi-robot deadlocks
+			\item \textbf{Intelligent recovery}: Handles QP failures gracefully
+		\end{itemize}
+	\end{frame}
+	
+	\begin{frame}{Potential Future Work}
+		\textbf{Algorithmic improvements:}
+		\begin{itemize}
+			\item Velocity-dependent $\gamma$: more conservative at high speeds
+			\item Multi-point CBF: constrain multiple surface points (prevents corner-cutting)
+			\item Predictive CBF: account for changing closest point during motion
+		\end{itemize}
+		
+		\vspace{0.3cm}
+		\textbf{System extensions:}
+		\begin{itemize}
+			\item Scale to $N > 2$ robots with decentralized coordination
+			\item Integration with global path planning
+			\item Hardware validation on physical platforms
+		\end{itemize}
+	\end{frame}
+	
+
+	
 \end{document}

@@ -577,21 +577,15 @@ class CBFController:
 
 
 def run_simulation():
-    # Initialize two robots - robot 2 starts behind
-    robot1 = TurtleBot(0.0, 0.0, 0.0)
-    robot2 = TurtleBot(-0.5, 0.5, 0.0)  # Starts 0.5m behind robot 1
+    # Initialize two robots on crossing paths
+    robot1 = TurtleBot(0.0, 0.0, np.pi / 4)  # Bottom left, heading toward top right
+    robot2 = TurtleBot(4.0, 0.0, 3 * np.pi / 4)  # Bottom right, heading toward top left
 
-    goal1 = np.array([5.0, 1.0])
-    goal2 = np.array([5.0, 1.5])  # Goals also closer together
+    goal1 = np.array([4.0, 4.0])  # Top right
+    goal2 = np.array([0.0, 4.0])  # Top left
 
-    # Static circular obstacle - positioned to block robot 1's direct path
-    static_obstacles = [
-        {
-            'x': 2.5,  # Center x
-            'y': 1.3,  # Center y - moved up by 0.3 (was 1.0)
-            'radius': 0.4  # Radius
-        }
-    ]
+    # No static obstacles - pure robot-robot interaction
+    static_obstacles = []
 
     # Simulation parameters
     dt = 0.05
@@ -602,14 +596,13 @@ def run_simulation():
     controller2 = CBFController(gamma=2.0, lidar_rays=72)
 
     # Run simulation
-    print("Starting two-robot simulation...")
+    print("Starting two-robot collision avoidance test...")
     print(f"Robot max acceleration: {robot1.max_a} m/s²")
     print(f"Robot max angular acceleration: {robot1.max_alpha} rad/s²")
+    print(f"Scenario: Crossing paths (no static obstacles)")
+    print(f"Robot 1: (0,0) → (4,4) [bottom-left to top-right]")
+    print(f"Robot 2: (4,0) → (0,4) [bottom-right to top-left]")
     print(f"Number of static obstacles: {len(static_obstacles)}")
-    print(f"Obstacle type: {'Rectangle' if static_obstacles[0].get('type') == 'rectangle' else 'Circle'}")
-    if static_obstacles[0].get('type') != 'rectangle':
-        print(
-            f"Circle at ({static_obstacles[0]['x']}, {static_obstacles[0]['y']}) with radius {static_obstacles[0]['radius']}")
 
     qp_failure_count1 = 0
     qp_failure_count2 = 0
@@ -754,8 +747,8 @@ fig = plt.figure(figsize=(16, 10))
 
 # Top left: Trajectory
 ax1 = fig.add_subplot(221)
-ax1.set_xlim(-0.5, 6)
-ax1.set_ylim(-0.5, 4)
+ax1.set_xlim(-0.5, 4.5)
+ax1.set_ylim(-0.5, 4.5)
 ax1.set_aspect('equal')
 ax1.grid(True, alpha=0.3)
 ax1.set_xlabel('X (m)', fontsize=12)
