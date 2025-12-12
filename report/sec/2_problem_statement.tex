@@ -1,0 +1,61 @@
+\section{Problem Statement}
+
+\subsection{System Model}
+
+We consider a differential drive robot modeled using unicycle kinematics on a two-dimensional plane. The robot's configuration is described by the state vector $\mathbf{x} = [x, y, \theta]^T$, where $(x, y)$ represents the position in the plane and $\theta$ is the heading angle. The system dynamics are:
+
+\begin{equation}
+	\begin{aligned}
+		\dot{x} &= v \cos\theta \\
+		\dot{y} &= v \sin\theta \\
+		\dot{\theta} &= \omega
+	\end{aligned}
+\end{equation}
+
+where the control inputs are:
+\begin{itemize}
+	\item $v \in [0, v_{\max}]$: linear velocity (m/s)
+	\item $\omega \in [-\omega_{\max}, \omega_{\max}]$: angular velocity (rad/s)
+\end{itemize}
+
+The robot is subject to physical constraints on both velocities and accelerations:
+\begin{equation}
+	\begin{aligned}
+		v &\in [0, 0.5] \text{ m/s} \\
+		\omega &\in [-1.5, 1.5] \text{ rad/s} \\
+		|\dot{v}| &\leq 0.5 \text{ m/s}^2 \\
+		|\dot{\omega}| &\leq 2.0 \text{ rad/s}^2
+	\end{aligned}
+\end{equation}
+
+The robot has a circular footprint with radius $R = 0.2$ m.
+
+\subsection{Perception}
+
+The robot is to be equipped with one or multiple LIDAR sensors that provide real-time distance measurements to obstacle surfaces.
+
+\subsection{Safety Requirements}
+
+The fundamental safety requirement is collision avoidance: the robot must maintain a safe distance from all obstacles at all times. Formally, for each detected obstacle surface point $\mathbf{p}_{\text{obs}}$, we require:
+
+\begin{equation}
+	\|\mathbf{p}_{\text{robot}} - \mathbf{p}_{\text{obs}}\| > R_{\text{robot}} + \text{buffer}
+\end{equation}
+
+where the buffer distance is a freely definable parameter, usually fixed to about $0.05$ m. However, in other cases, it could also be switched depending on what kind of obstacle is close.
+
+
+\subsection{Performance Objectives}
+
+While maintaining safety, the robot should also:
+\begin{enumerate}
+	\item Reach goal positions efficiently with minimal deviation from direct paths
+	\item Maintain forward momentum when possible rather than stopping
+	\item Navigate smoothly without abrupt control changes
+	\item Coordinate effectively with other robots to avoid deadlocks
+\end{enumerate}
+
+\subsection{Challenge: Balancing Safety and Efficiency}
+
+The core challenge is to design a control system that provides formal safety guarantees while maximizing navigation efficiency. Overly conservative approaches that stop the robot far from obstacles are safe but inefficient, while aggressive approaches that maintain high speeds risk collision. Our approach must find the optimal balance, enabling the robot to navigate as quickly as possible while absolutely ensuring collision-free operation.
+

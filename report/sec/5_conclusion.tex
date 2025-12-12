@@ -1,0 +1,42 @@
+\section{Conclusion}
+This report presented a practical implementation of Control Barrier Functions for safe robot navigation.
+
+\subsection{Advantages of the Approach}
+
+The CBF-based framework offers several significant advantages:
+
+\begin{itemize}
+	\item \textbf{Formal safety guarantees:} Mathematical proof of collision-free operation
+	\item \textbf{Real-time computation:} QP formulation enables fast online solution
+	\item \textbf{Minimal invasiveness:} Acts as a safety filter, allowing any nominal controller
+	\item \textbf{Smooth control:} Little to no abrupt switching or discontinuities
+	\item \textbf{Scalability:} Naturally extends to multiple obstacles and robots
+\end{itemize}
+
+\subsection{Limitations and Future Work}
+
+While the current implementation demonstrates functional obstacle avoidance, several areas present opportunities for refinement and extension. Notably, the algorithm's parameters, particularly the barrier function parameters and cost function weights, could be systematically optimized to achieve better performance across diverse scenarios.
+
+\textbf{Algorithmic Improvements:}
+\begin{itemize}
+	\item \textbf{Velocity-dependent $\gamma$:} Adapting the CBF parameter based on current velocity would enable more conservative behavior at high speeds while maintaining agility at low speeds
+	
+	\item \textbf{Multi-point CBF:} Currently, only the closest obstacle point is considered. Constraining multiple surface points simultaneously would prevent corner-cutting and provide more robust obstacle avoidance
+	
+	\item \textbf{Predictive CBF:} Accounting for the fact that the closest point may change during motion would improve behavior in dynamic scenarios
+	
+	\item \textbf{Uncertainty handling:} Incorporating measurement uncertainty and obstacle motion prediction would enhance robustness
+\end{itemize}
+
+\textbf{System Extensions:}
+\begin{itemize}
+	\item \textbf{Scaling to $N > 2$ robots:} Extending the priority system to large-scale multi-robot systems with decentralized coordination
+	
+	\item \textbf{Global path planning integration:} Combining CBF local control with global planners for complete navigation solutions
+	
+	\item \textbf{Hardware validation:} Testing on physical robot platforms to address real-world effects such as sensor noise, actuator delays, and model uncertainties
+	
+	\item \textbf{Human-robot interaction:} Adapting the approach for safe navigation around humans
+\end{itemize}
+
+Finally, it can be said that Control Barrier Functions provide a powerful framework for ensuring safety in robotic systems while maintaining high performance. Our implementation demonstrates that CBFs can be successfully applied to practical navigation problems, offering formal safety guarantees without sacrificing efficiency. The turn-first strategy and priority-based coordination further enhance the approach, making it well-suited for deployment in multi-robot industrial environments. As autonomous robots become increasingly prevalent in dynamic shared spaces, techniques like those presented here could be essential for ensuring safe and efficient operations.

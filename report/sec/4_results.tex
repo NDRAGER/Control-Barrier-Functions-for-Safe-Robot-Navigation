@@ -1,0 +1,119 @@
+\section{Experimental Results}
+
+We conducted a series of simulation experiments to validate our approach across different scenarios of increasing complexity.
+
+\subsection{Scenario 1: Single Robot with Static Obstacle}
+
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=0.5\textwidth]{rectangle.png}
+	\caption{A single robot navigates toward a goal while avoiding a rectangular static obstacle positioned in its path.}
+	\label{fig:rectangle}
+\end{figure}
+
+
+\textbf{Observations:}
+\begin{itemize}
+	\item The robot successfully detects the obstacle using LIDAR
+	\item Upon approach, the turn-first strategy activates
+	\item The robot smoothly steers around the obstacle while mostly maintaining forward momentum
+	\item No stopping occurs; the robot maintains motion
+	\item CBF value $h$ remains positive throughout, confirming safety
+\end{itemize}
+
+\textbf{Key Result:} The turn-first strategy enables efficient navigation without stopping, demonstrating the advantage over stop-based avoidance approaches.
+
+\subsection{Scenario 2: Single Robot with Two Obstacles}
+
+\textbf{Setup:} 
+
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=0.5\textwidth]{2obstacles.png}
+	\caption{The robot must navigate through a narrow passage formed by two static obstacles.}
+	\label{fig:obstacles}
+\end{figure}
+
+\textbf{Observations:}
+\begin{itemize}
+	\item The robot detects both obstacles simultaneously
+	\item As the passage narrows, the robot reduces speed (as indicated by the cost function adaptation)
+	\item The robot successfully passes through the gap
+	\item Velocity profiles show controlled deceleration and re-acceleration
+	\item Safety is maintained with both obstacles
+\end{itemize}
+
+\textbf{Key Result:} The system appropriately balances safety and efficiency in constrained spaces, slowing when necessary but not stopping unless required. Still room for improvement here in terms of going continuously, but the stopping might be due to the lack of prediction as we only use one point on the obstacle to constrain our QP. The curvature would then result in the robot getting further and further pushed outwards, with lots of cases in which the robot might oscillate between the frontal and side-ways case for the cost function.
+\newpage
+\subsection{Scenario 3: Two Robots Crossing Paths}
+
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=0.5\textwidth]{cross.png}
+	\caption{Two robots with crossing trajectories approach an intersection.}
+	\label{fig:cross}
+\end{figure}
+
+\textbf{Observations:}
+\begin{itemize}
+	\item Both robots detect each other via LIDAR
+	\item Without priority system: One robot passes in front, causing the other to emergency stop
+	\item This demonstrates the need for coordination in multi-robot scenarios
+\end{itemize}
+
+\textbf{Key Result:} Basic CBF ensures safety but can lead to inefficient behaviors in multi-robot scenarios without coordination.
+
+\subsection{Scenario 4: Two Robots with Obstacle (Priority System)}
+
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=0.5\textwidth]{robotpushin2.png}
+	\caption{Two robots and a static obstacle, with robots being funneled together, the priority system makes the one behind "push" the other}
+	\label{fig:2robot}
+\end{figure}
+
+\textbf{Observations:}
+\begin{itemize}
+	\item Priority is dynamically assigned based on proximity to static obstacle
+	\item Robot closest to obstacle becomes dominant (priority robot)
+	\item Priority robot maintains its trajectory with tighter safety margins
+	\item Non-priority robot yields by maintaining larger safety margins
+	\item Both robots successfully navigate without collision or deadlock
+	\item No stopping occurs for either robot
+\end{itemize}
+
+\textbf{Key Result:} The priority system successfully resolves multi-robot conflicts, enabling efficient coordinated navigation.
+
+\subsection{Quantitative Analysis}
+
+Analysis of the logged data reveals:
+
+\textbf{Safety Metrics:}
+\begin{itemize}
+	\item Minimum CBF value across all scenarios: $h_{\min} > 0$ (always safe)
+	\item Zero collisions in all tested scenarios
+	\item Safety maintained even during emergency recovery
+\end{itemize}
+
+\textbf{Efficiency Metrics:}
+\begin{itemize}
+	\item Average velocity: 0.374 m/s (74.8\% of maximum)
+	\item Goal reaching time reduced by $\approx$40\% in cluttered environments
+\end{itemize}
+
+
+\subsection{Parameter Sensitivity}
+
+We investigated the effect of the CBF parameter $\gamma$ on system behavior:
+
+\begin{itemize}
+	\item $\gamma = 1$: Very conservative, large safety margins, frequent velocity reduction
+	\item $\gamma = 2$: Good balance between safety and efficiency (chosen for experiments)
+	\item $\gamma = 5$: More aggressive, smaller margins, higher velocities
+	\item $\gamma = 15$: Very aggressive, approaches boundary closely, risks discretization effects
+\end{itemize}
+
+The choice of $\gamma = 2.0$ provides robust performance across all tested scenarios.
+
+\subsection{Gazebo Simulation}
+Scenario 2 and 4 have also been implemented in Gazebo. Videos of that simulation as well as the code has been attached.

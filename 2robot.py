@@ -15,11 +15,11 @@ class TurtleBot:
         self.max_a = 0.5  # Max linear acceleration (m/s^2)
         self.max_alpha = 2.0  # Max angular acceleration (rad/s^2)
 
-        # Current velocities
+        # current velocities
         self.v = 0.0
         self.w = 0.0
 
-        # History storage
+        # history storage
         self.history = {
             'x': [x],
             'y': [y],
@@ -32,18 +32,16 @@ class TurtleBot:
         }
 
     def update(self, v_cmd, w_cmd, dt, time, cbf_active, h_value):
-        """Update robot state with velocity commands and log all data"""
-        # Velocities are now already constrained by QP, just apply them directly
         self.v = v_cmd
         self.w = w_cmd
 
-        # Update position
+        # update position
         self.x += self.v * np.cos(self.theta) * dt
         self.y += self.v * np.sin(self.theta) * dt
         self.theta += self.w * dt
         self.theta = np.arctan2(np.sin(self.theta), np.cos(self.theta))  # Normalize
 
-        # Store everything together
+        # store everything together
         self.history['x'].append(self.x)
         self.history['y'].append(self.y)
         self.history['theta'].append(self.theta)
@@ -60,15 +58,14 @@ class CBFController:
         self.lidar_rays = lidar_rays
 
     def nominal_controller(self, robot, goal):
-        """Simple proportional controller to drive to goal"""
         dx = goal[0] - robot.x
         dy = goal[1] - robot.y
 
-        # Desired velocity - use max velocity instead of hard-coded value
+        # desired velocity
         distance = np.sqrt(dx ** 2 + dy ** 2)
         v_des = min(robot.max_v, 0.5 * distance)
 
-        # Desired angular velocity (proportional to angle error)
+        # desired angular velocity (proportional to angle error)
         angle_to_goal = np.arctan2(dy, dx)
         angle_diff = np.arctan2(np.sin(angle_to_goal - robot.theta),
                                 np.cos(angle_to_goal - robot.theta))
@@ -77,12 +74,6 @@ class CBFController:
         return v_des, w_des
 
     def lidar_scan(self, robot, obstacles, max_range=10.0):
-        """
-        Simulate 360° LIDAR scan around the robot.
-        Returns list of (angle, distance, hit_point) for rays that hit obstacles.
-        Properly handles occlusion - rays stop at the first obstacle they hit.
-        Supports both circular and rectangular obstacles.
-        """
         # Handle single obstacle (dict) or multiple obstacles (list)
         if isinstance(obstacles, dict):
             obstacles = [obstacles]
@@ -103,14 +94,14 @@ class CBFController:
 
             for obstacle in obstacles:
                 if obstacle.get('type') == 'rectangle':
-                    # Rectangle obstacle
-                    # Check intersection with all four edges
+                    # rectangle obstacle
+                    # check intersection with all four edges
                     rect_x = obstacle['x']
                     rect_y = obstacle['y']
                     width = obstacle['width']
                     height = obstacle['height']
 
-                    # Four edges of the rectangle
+                    # four edges of the rectangle
                     edges = [
                         # (x1, y1, x2, y2) for each edge
                         (rect_x - width / 2, rect_y - height / 2, rect_x + width / 2, rect_y - height / 2),  # Bottom
@@ -122,17 +113,17 @@ class CBFController:
                     for edge in edges:
                         x1, y1, x2, y2 = edge
 
-                        # Ray-line segment intersection
-                        # Ray: P = robot_pos + t * ray_dir
-                        # Line: P = P1 + s * (P2 - P1), where 0 <= s <= 1
+                        # ray-line segment intersection
+                        # ray: P = robot_pos + t * ray_dir
+                        # line: P = P1 + s * (P2 - P1), where 0 <= s <= 1
 
                         dx_edge = x2 - x1
                         dy_edge = y2 - y1
 
-                        # Solve: robot + t*ray_dir = P1 + s*(P2-P1)
+                        # solve: robot + t*ray_dir = P1 + s*(P2-P1)
                         denominator = ray_dx * dy_edge - ray_dy * dx_edge
 
-                        if abs(denominator) > 1e-10:  # Not parallel
+                        if abs(denominator) > 1e-10:  # not parallel
                             dx_to_edge = x1 - robot.x
                             dy_to_edge = y1 - robot.y
 
@@ -150,7 +141,7 @@ class CBFController:
                                     'obstacle': obstacle
                                 }
                 else:
-                    # Circular obstacle (original code)
+                    # circular obstacle (original code)
                     to_obs_x = obstacle['x'] - robot.x
                     to_obs_y = obstacle['y'] - robot.y
 
@@ -183,10 +174,6 @@ class CBFController:
         return detections
 
     def cluster_detections(self, detections, cluster_distance=0.3):
-        """
-        Cluster LIDAR detections into separate objects.
-        Points within cluster_distance are considered part of the same object.
-        """
         if not detections:
             return []
 
@@ -223,17 +210,12 @@ class CBFController:
                                 (first_point[1] - last_point[1]) ** 2)
 
             if wrap_dist <= cluster_distance:
-                # Merge first and last clusters
+                # merge first and last clusters
                 clusters[0] = clusters[-1] + clusters[0]
                 clusters.pop()
 
         return clusters
-        """
-        Simulate 360° LIDAR scan around the robot.
-        Returns list of (angle, distance, hit_point) for rays that hit obstacles.
-        Properly handles occlusion - rays stop at the first obstacle they hit.
-        Supports both circular and rectangular obstacles.
-        """
+
         # Handle single obstacle (dict) or multiple obstacles (list)
         if isinstance(obstacles, dict):
             obstacles = [obstacles]
@@ -244,11 +226,11 @@ class CBFController:
             # Ray angle in global frame
             ray_angle = 2 * np.pi * i / self.lidar_rays
 
-            # Ray direction
+            # ray direction
             ray_dx = np.cos(ray_angle)
             ray_dy = np.sin(ray_angle)
 
-            # Find the closest intersection across all obstacles
+            # find the closest intersection across all obstacles
             closest_hit = None
             closest_distance = max_range
 
@@ -273,14 +255,10 @@ class CBFController:
                     for edge in edges:
                         x1, y1, x2, y2 = edge
 
-                        # Ray-line segment intersection
-                        # Ray: P = robot_pos + t * ray_dir
-                        # Line: P = P1 + s * (P2 - P1), where 0 <= s <= 1
-
                         dx_edge = x2 - x1
                         dy_edge = y2 - y1
 
-                        # Solve: robot + t*ray_dir = P1 + s*(P2-P1)
+                        # solve: robot + t*ray_dir = P1 + s*(P2-P1)
                         denominator = ray_dx * dy_edge - ray_dy * dx_edge
 
                         if abs(denominator) > 1e-10:  # Not parallel
@@ -301,7 +279,6 @@ class CBFController:
                                     'obstacle': obstacle
                                 }
                 else:
-                    # Circular obstacle (original code)
                     to_obs_x = obstacle['x'] - robot.x
                     to_obs_y = obstacle['y'] - robot.y
 
@@ -334,12 +311,6 @@ class CBFController:
         return detections
 
     def compute_cbf_all_obstacles(self, robot, obstacles):
-        """
-        Compute CBF considering all obstacles.
-        Performs LIDAR scan and clusters detections to identify separate objects.
-        Returns the minimum h value, critical point, and cluster information.
-        Uses different safety buffers for static vs dynamic (robot) obstacles.
-        """
         # Scan all obstacles (with occlusion handling built-in)
         all_detections = self.lidar_scan(robot, obstacles)
 
@@ -353,7 +324,7 @@ class CBFController:
         # Store clusters for analysis
         self.last_clusters = clusters
 
-        # Find the single closest detection point across ALL obstacles
+        # find the single closest detection point across ALL obstacles
         closest_detection = min(all_detections, key=lambda d: d['distance'])
 
         obs_x, obs_y = closest_detection['point']
@@ -398,16 +369,10 @@ class CBFController:
         return h, critical_point, all_detections
 
     def compute_cbf_derivative(self, robot, dx, dy, v, w):
-        """
-        Compute CBF time derivative for a single point
-        h(x) = ||p_robot - p_surface||^2 - R_robot^2
-        h_dot = 2*(p_robot - p_surface)^T * p_robot_dot
-        """
         h_dot = 2 * (dx * v * np.cos(robot.theta) + dy * v * np.sin(robot.theta))
         return h_dot
 
     def safe_controller(self, robot, goal, obstacles):
-        """CBF-based QP controller with single closest point"""
         v_des, w_des = self.nominal_controller(robot, goal)
 
         # Handle both single obstacle (dict) and multiple obstacles (list)
@@ -420,7 +385,7 @@ class CBFController:
         # Store detections for visualization
         self.last_detections = detections
 
-        # Only activate CBF if close to any obstacle
+        # only activate CBF if close to any obstacle
         if h_min > 2.0:
             return v_des, w_des, False  # Not close, use nominal control
 
@@ -500,7 +465,7 @@ class CBFController:
         else:
             initial_guess = [v_des, w_des]
 
-        # Clamp initial guess to bounds
+        # clamp initial guess to bounds
         initial_guess[0] = np.clip(initial_guess[0], v_min, v_max)
         initial_guess[1] = np.clip(initial_guess[1], w_min, w_max)
 
@@ -635,8 +600,8 @@ def run_simulation():
         ]
 
         # Compute safe control for both robots
-        # First, determine which robot is closer to static obstacles
-        # This robot gets priority (lower gamma for other robot = less avoidance)
+        # first, determine which robot is closer to static obstacles
+        # this robot gets priority (lower gamma for other robot = less avoidance)
 
         # Find closest static obstacle for each robot
         h1_static = 10.0

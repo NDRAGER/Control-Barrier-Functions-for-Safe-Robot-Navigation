@@ -1,0 +1,31 @@
+\section{Introduction}
+
+\subsection{Motivation}
+
+The deployment of autonomous mobile robots in dynamic, multi-agent environments has become increasingly common across various domains, from warehouse automation to collaborative manufacturing. In these settings, safety is paramount as robots must reliably avoid collisions with obstacles, other robots, and humans while efficiently completing their assigned tasks. Traditional approaches to collision avoidance often rely on conservative behaviors that sacrifice performance for safety, leading to inefficient operations characterized by frequent stopping and cautious maneuvering.
+
+The challenge becomes particularly acute in high-density environments such as automated warehouses, where multiple robots operate simultaneously in shared spaces. These scenarios demand real-time collision avoidance that can handle:
+\begin{itemize}
+	\item \textbf{Dynamic obstacles}: Other robots and moving objects whose trajectories must be continuously monitored and avoided
+	\item \textbf{Tight spaces}: Narrow passages where conservative stopping behaviors would create bottlenecks
+	\item \textbf{Real-time constraints}: Control decisions must be computed within milliseconds to enable responsive behavior
+	\item \textbf{Formal safety guarantees}: The system must provide mathematical assurances that collisions will not occur
+\end{itemize}
+
+Control Barrier Functions (CBFs) have emerged as a powerful framework for addressing these challenges. CBFs provide a mathematically rigorous approach to encoding safety constraints that can be integrated into control systems through optimization-based methods. Unlike heuristic collision avoidance approaches, CBFs offer formal guarantees of forward invariance - if the system starts in a safe state, it will remain safe for all time.
+
+\subsection{Contribution}
+
+This report presents a practical implementation of CBF-based safe navigation for differential drive robots with the following contributions:
+
+\begin{enumerate}
+	\item A turn-first collision avoidance strategy that maintains forward momentum by prioritizing steering over deceleration, enabling faster navigation through constrained environments
+	
+	\item Integration of LIDAR-based perception with CBF constraints, allowing real-time detection and avoidance of obstacles using surface point measurements
+	
+	\item A priority-based coordination scheme for multi-robot scenarios that resolves potential deadlocks by dynamically assigning navigation priority based on proximity to static obstacles
+	
+	\item Comprehensive simulation studies demonstrating the effectiveness of the approach in various scenarios, from single-robot navigation to multi-robot coordination
+\end{enumerate}
+
+The remainder of this report is organized as follows: Section 2 formalizes the safe navigation problem, Section 3 presents our CBF-based solution including the control algorithm and multi-robot coordination, Section 4 presents experimental results, and Section 5 concludes with discussion and future work.

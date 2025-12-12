@@ -1,0 +1,279 @@
+\section{Solution Approach}
+
+\subsection{Control Barrier Functions: Theoretical Foundation}
+
+A Control Barrier Function (CBF) provides a mathematical framework for encoding safety constraints. Given a continuously differentiable function $h(\mathbf{x}): \mathcal{D} \rightarrow \mathbb{R}$, we define the safe set as:
+
+\begin{equation}
+	\mathcal{C} = \{\mathbf{x} \in \mathcal{D} \mid h(\mathbf{x}) \geq 0\}
+\end{equation}
+
+The function $h$ is a CBF if there exists an extended class $\mathcal{K}$ function $\gamma$ such that for all $\mathbf{x} \in \mathcal{C}$:
+
+\begin{equation}
+	\sup_{\mathbf{u} \in U} [\dot{h}(\mathbf{x}, \mathbf{u})] = \frac{\partial h}{\partial \mathbf{x}} f(\mathbf{x}) + \frac{\partial h}{\partial \mathbf{x}} g(\mathbf{x}) \mathbf{u} \geq -\gamma(h(\mathbf{x}))
+\end{equation}
+
+This condition ensures forward invariance: if the system starts in the safe set ($h(\mathbf{x}_0) \geq 0$), it will remain safe for all time ($h(\mathbf{x}(t)) \geq 0$ for all $t \geq 0$).
+
+As for a choice of \(\gamma(h(\mathbf{x}))\), the linear approach of \(\gamma h(\mathbf{x}), \gamma > 0\) is regularly used.
+
+\subsection{Overall Pipeline}
+
+The basic loop our safe control operating using CBF looks as follows. Note, that clustering and multirobot control are optional and not shown.
+\begin{figure}[h]
+	\centering
+	\begin{tikzpicture}[
+		node distance=0.6cm,
+		block/.style={rectangle, draw, fill=blue!20, text width=3.2cm, text centered, minimum height=0.7cm, font=\footnotesize},
+		decision/.style={diamond, draw, fill=yellow!20, text width=1.4cm, text centered, aspect=2, font=\footnotesize},
+		arrow/.style={->,>=stealth}
+		]
+		
+		% Main flow
+		\node[block] (lidar) {LIDAR Scan};
+		\node[block, below=of lidar] (cbf) {CBF};
+		\node[block, right=of cbf] (nominal) {Nominal Controller};
+		\node[block, below=of cbf] (mode) {Select Cost Function};
+		\node[block, below=of mode] (qp) {Solve QP: $\min J(\mathbf{u})$\\s.t. $\dot{h} + \gamma h \geq 0$};
+		\node[decision, below=of qp] (feasible) {Feasible?};
+		\node[block, right=of feasible] (emergency) {Emergency Recovery};
+		\node[block, below=of feasible] (apply) {Apply $\mathbf{u}$, Update State};
+		
+		% Arrows
+		\draw[arrow] (lidar) -- node[left,font=\tiny] {$\mathbf{p}_{\text{obs}}$} (cbf);
+		\draw[arrow] (cbf) -- node[left,font=\tiny] {$h(\mathbf{x})$, $\dot{h}(\mathbf{x}, \mathbf{u})$} (mode);
+		\draw[arrow] (nominal) -- node[above,font=\tiny] {$\mathbf{u}_{\text{des}}$} (mode);
+		\draw[arrow] (mode) -- node[left,font=\tiny] {$J(\mathbf{u})$} (qp);
+		\draw[arrow] (qp) -- (feasible);
+		\draw[arrow] (feasible) -- node[above, font=\tiny] {No} (emergency);
+		\draw[arrow] (feasible) -- node[left, font=\tiny] {Yes} (apply);
+		\draw[arrow] (emergency) |- (apply);
+		\draw[arrow] (apply) -- ++(-2.2,0) |- (lidar);
+		
+	\end{tikzpicture}
+	\caption{Core algorithm flow: LIDAR perception feeds into CBF computation, which combines with nominal control to form a QP. The QP solution (or emergency recovery) produces safe control commands.}
+	\label{fig:core_algorithm}
+\end{figure}
+\newpage
+
+\subsection{Simulation Environment}
+
+Initially, we implemented the basic CBF algorithm in Gazebo, the results of which can be found in the results section. We intended to implement the entire system there, but after facing technical challenges that would be too time-consuming to resolve, we instead opted for a custom Python-based simulation environment (corresponding code is attached). This approach provided several advantages:
+
+\begin{itemize}
+	\item \textbf{Rapid development}: Pure Python implementation using NumPy, SciPy, and Matplotlib
+	\item \textbf{Deterministic behavior}: Precise control over simulation timesteps and dynamics
+	\item \textbf{Easy debugging}: Direct access to all state variables and intermediate computations
+	\item \textbf{Visualization}: Real-time plotting of trajectories, CBF values, and control inputs
+\end{itemize}
+
+The simulation architecture consists of:
+
+\begin{enumerate}
+	\item \textbf{TurtleBot class}: Encapsulates robot state, dynamics, and constraints
+	\begin{itemize}
+		\item State update using Euler integration with 50 ms timestep
+		\item History logging for position, velocities, CBF values, and control inputs
+		\item Physical constraint enforcement (velocity and acceleration limits)
+	\end{itemize}
+	
+	\item \textbf{CBFController class}: Implements the safety filter
+	\begin{itemize}
+		\item LIDAR ray casting with occlusion handling
+		\item CBF computation and derivative calculation
+		\item QP formulation using SciPy's \texttt{minimize} with SLSQP method
+		\item Emergency recovery mechanism
+	\end{itemize}
+	
+	\item \textbf{Visualization}: Matplotlib-based plotting
+	\begin{itemize}
+		\item Trajectory overlay with obstacle representations
+		\item LIDAR ray visualization showing detections
+		\item Time-series plots of CBF values and control inputs
+		\item Multi-panel figures for comprehensive analysis
+	\end{itemize}
+\end{enumerate}
+
+The simulation timestep of $dt = 0.05$ s (20 Hz) was chosen to balance computational efficiency with accuracy, matching typical control rates in real robotic systems.
+
+
+\subsection{LIDAR Ray Casting}
+
+The LIDAR simulation implements proper occlusion handling, meaning rays stop at the first obstacle they hit. For each ray at angle $\theta_i$:
+
+\begin{enumerate}
+	\item Cast ray from robot position in direction $(\cos\theta_i, \sin\theta_i)$
+	\item Solve intersection with obstacle
+	\item Return the closest intersection across all obstacles
+\end{enumerate}
+
+\begin{figure}[h]
+	\centering
+	\includegraphics[width=0.5\textwidth]{lidar.png}
+	\caption{Demonstration of LIDAR simulation.}
+	\label{fig:lidar}
+\end{figure}
+
+
+This approach supports both circular and rectangular obstacle geometries, with rectangular obstacles requiring ray-line segment intersection tests for each of the four edges.
+
+\subsection{Detection Clustering}
+
+Raw LIDAR detections are optionally clustered to identify distinct objects using a proximity-based algorithm:
+
+\begin{algorithm}
+	\caption{LIDAR Detection Clustering}
+	\begin{algorithmic}
+		\STATE Sort detections by angle
+		\STATE Initialize first cluster with first detection
+		\FOR{each subsequent detection $d_i$}
+		\STATE Compute distance to last point in current cluster
+		\IF{distance $\leq$ threshold (0.3 m)}
+		\STATE Add $d_i$ to current cluster
+		\ELSE
+		\STATE Start new cluster with $d_i$
+		\ENDIF
+		\ENDFOR
+		\STATE Check wrap-around: merge first and last clusters if close
+	\end{algorithmic}
+\end{algorithm}
+
+The clustering threshold of 0.3 m was chosen empirically to balance between over-segmentation (treating one object as many) and under-segmentation (treating multiple objects as one).
+
+\subsection{Nominal Controller Design}
+
+The nominal controller generates desired control inputs $\mathbf{u}_{\text{des}} = [v_{\text{des}}, \omega_{\text{des}}]^T$ that drive the robot toward a given goal without considering obstacles. We implement a simple proportional controller:
+
+\begin{equation}
+	\begin{aligned}
+		v_{\text{des}} &= \min(v_{\max}, K_v \cdot d_{\text{goal}}) \\
+		\omega_{\text{des}} &= K_\omega \cdot \text{angle\_error}
+	\end{aligned}
+\end{equation}
+
+where:
+\begin{itemize}
+	\item $d_{\text{goal}} = \sqrt{(x_{\text{goal}} - x)^2 + (y_{\text{goal}} - y)^2}$ is the distance to goal
+	\item $\text{angle\_error} = \text{atan2}(\sin(\theta_{\text{goal}} - \theta), \cos(\theta_{\text{goal}} - \theta))$ is the heading error
+	\item $K_v = 0.5$ is the linear velocity gain
+	\item $K_\omega = 3.0$ is the angular velocity gain
+\end{itemize}
+
+The linear velocity is proportional to distance (for smooth approach to goal) but capped at $v_{\max}$. The angular velocity uses a proportional controller on the heading error, with the $\text{atan2}$ formulation ensuring proper angle wrapping in $[-\pi, \pi]$.
+
+This nominal controller is intentionally simple and potentially unsafe—it does not consider obstacles. The CBF-based safety filter then modifies these desired inputs to guarantee collision-free motion while deviating minimally from the nominal behavior.
+
+
+\subsection{Barrier Function Design}
+
+For each closest detected surface point $\mathbf{p}_{\text{obs}}$, we define the barrier function:
+\begin{equation}
+	h(\mathbf{x}) = \|\mathbf{p}_{\text{robot}} - \mathbf{p}_{\text{obs}}\|^2 - (R_{\text{robot}} + \text{buffer})^2
+\end{equation}
+
+This formulation has several advantages:
+\begin{itemize}
+	\item $h > 0$ when the robot is at a safe distance
+	\item $h = 0$ on the boundary of the safe set
+	\item $h < 0$ indicates a safety violation (collision)
+	\item The squared distance simplifies derivative calculations
+\end{itemize}
+
+The time derivative of $h$ is:
+\begin{equation}
+	\begin{aligned}
+		\dot{h} &= 2(\mathbf{x} - \mathbf{x}_{\text{obs}})^T \dot{\mathbf{x}} \\
+		&= 2(x - x_{\text{obs}})(v\cos\theta) + 2(y - y_{\text{obs}})(v\sin\theta)
+	\end{aligned}
+\end{equation}
+
+\subsection{Turn-First Avoidance Strategy}
+
+A key innovation in our approach is the turn-first strategy that adapts the cost function based on the robot's situation relative to obstacles. We distinguish between two modes:
+
+\textbf{Standard Mode} (not heading directly toward obstacle):
+\begin{equation}
+	J(\mathbf{u}) = (v - v_{\text{des}})^2 + 0.5(\omega - \omega_{\text{des}})^2
+\end{equation}
+
+\textbf{Obstacle Avoidance Mode} (when $|\text{angle\_diff}| < 60°$ and $h < 1.0$):
+\begin{equation}
+	J(\mathbf{u}) = \begin{cases}
+		8.0 v^2 + 0.5(\omega - \omega_{\text{target}})^2 & \text{if } h < 0.3 \\
+		4.0 v^2 + 0.5(\omega - \omega_{\text{target}})^2 & \text{if } 0.3 \leq h < 0.6 \\
+		2.0(v - v_{\text{des}})^2 + 0.5(\omega - \omega_{\text{target}})^2 & \text{if } h \geq 0.6
+	\end{cases}
+\end{equation}
+
+where $\omega_{\text{target}}$ encourages turning away from the obstacle. This strategy employs a distance-based penalty strategy. When obstacles are very close ($h < 0.3$), forward velocity is strongly penalized. As distance increases, this penalty gradually tapers off. This approach actively encourages steering maneuvers over complete stops, thereby maintaining momentum for efficient navigation. The reason why we differentiate between the two cases is that for our project, we assume acceleration to be capped. Without any predictive possibilities to check upcoming collision, this is a useful geometric heuristic.
+
+\subsection{QP-Based Safe Controller}
+
+The safe control inputs are computed by solving a Quadratic Program (QP) that minimizes deviation from desired control while satisfying CBF constraints:
+
+\begin{equation}
+	\begin{aligned}
+		\min_{v, \omega} \quad & J(\mathbf{u}) = \|\mathbf{u} - \mathbf{u}_{\text{des}}\|^2 \\
+		\text{subject to:} \quad & \dot{h} + \gamma h \geq 0 \\
+		& v \in [v_{\text{prev}} - a_{\max}dt, v_{\text{prev}} + a_{\max}dt] \\
+		& \omega \in [\omega_{\text{prev}} - \alpha_{\max}dt, \omega_{\text{prev}} + \alpha_{\max}dt]
+	\end{aligned}
+\end{equation}
+
+The controller is configured with a barrier parameter of $\gamma = 2.0$ to balance safety against agility. Acceleration limits are embedded as direct constraints in the Quadratic Program (QP), ensuring all computed commands remain within the robot's physical capabilities. Furthermore, the generic quadratic cost function $J(\mathbf{u})$ is changed dynamically based on the operational mode, switching between goal-oriented and obstacle-avoidance priorities as described in the previous section.
+
+
+\subsection{Emergency Recovery}
+
+When the QP becomes infeasible (no control satisfies all constraints), a recovery mechanism is activated:
+
+\begin{algorithm}
+	\caption{Emergency Recovery}
+	\begin{algorithmic}
+		\STATE Test $\dot{h}$ for left and right turns at maximum $\omega$
+		\STATE Choose direction that maximizes $\dot{h}$
+		\IF{$v = 0.05$ m/s with turn is safe}
+		\STATE Apply slow forward motion with turn
+		\ELSE
+		\STATE Apply pure rotation ($v = 0$)
+		\ENDIF
+	\end{algorithmic}
+\end{algorithm}
+
+This approach maintains progress even in difficult situations, avoiding static stopping whenever possible. During our simulations it mainly served a purpose of easing the debugging process.
+
+\subsection{Multi-Robot Priority System}
+
+For multi-robot coordination, we implemented a decentralized and dynamic priority system that operates without explicit communication. Each robot independently assesses its situation based on local sensor information and adjusts its behavior accordingly. Hereby, it is assumed the robot can differentiate between robots and other objects (for example by them communicating general position), such that the detected point cluster on the robot can be identified as such.
+
+Priority is then assigned using a simple geometric rule: whichever robot is closer to the nearest static obstacle receives higher priority. This is motivated by the observation that a robot with less free space has fewer options to maneuver and should therefore be given the right-of-way.
+
+\vspace{0.5em}
+\noindent
+\textbf{Procedure:}
+\begin{enumerate}
+	\setlength\itemsep{0.5em}
+	\item Each robot measures its distance to the nearest static obstacle.
+	\item The robot with the \emph{smaller} distance is assigned \emph{dominant} priority.
+	\item The other robot is assigned \emph{yielding} status.
+\end{enumerate}
+
+Once priorities are determined, each robot adjusts its CBF safety margins for inter-robot avoidance:
+
+\begin{itemize}
+	\item \textbf{Dominant robot:} Uses a \emph{negative} buffer of $-0.05$ m with respect to other robots, allowing it to approach closer than the nominal collision distance.
+	\item \textbf{Yielding robot:} Uses a \emph{zero} buffer, maintaining exactly the nominal collision distance.
+\end{itemize}
+
+This intentional asymmetry breaks potential control symmetries that could lead to deadlock. The dominant robot is effectively permitted to ``push through'' a shared space, while the yielding robot adopts a more conservative constraint, creating a clear right-of-way rule.
+
+The same principle can be extended to scenarios with $N > 2$ robots: priority is assigned based on each robot's proximity to static obstacles, and buffers are adjusted accordingly. Robots with higher priority (closer to obstacles) are granted more aggressive inter-robot margins, while those with lower priority yield.
+
+\subsection{Division of Work}
+\begin{itemize}
+	\item Nicolas Drager: proposal, innovations, full python simulation of described algorithm, presentation, report
+	\item Harsh Akabari and Satvik Tajane: python and Gazebo simulation of basic CBF 
+\end{itemize}
+
+

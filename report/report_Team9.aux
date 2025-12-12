@@ -1,10 +1,56 @@
 \relax 
-\bibcite{b1}{1}
-\bibcite{b2}{2}
-\bibcite{b3}{3}
-\bibcite{b4}{4}
-\bibcite{b5}{5}
-\bibcite{b6}{6}
-\bibcite{b7}{7}
-\@writefile{toc}{\contentsline {section}{References}{1}{}\protected@file@percent }
-\gdef \@abspage@last{1}
+\providecommand\hyper@newdestlabel[2]{}
+\providecommand\HyField@AuxAddToFields[1]{}
+\providecommand\HyField@AuxAddToCoFields[2]{}
+\@writefile{toc}{\contentsline {section}{\numberline {1}Introduction}{1}{section.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.1}Motivation}{1}{subsection.1.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {1.2}Contribution}{1}{subsection.1.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {2}Problem Statement}{2}{section.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.1}System Model}{2}{subsection.2.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.2}Perception}{2}{subsection.2.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.3}Safety Requirements}{2}{subsection.2.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.4}Performance Objectives}{2}{subsection.2.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {2.5}Challenge: Balancing Safety and Efficiency}{2}{subsection.2.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {3}Solution Approach}{2}{section.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.1}Control Barrier Functions: Theoretical Foundation}{2}{subsection.3.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.2}Overall Pipeline}{2}{subsection.3.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {1}{\ignorespaces Core algorithm flow: LIDAR perception feeds into CBF computation, which combines with nominal control to form a QP. The QP solution (or emergency recovery) produces safe control commands.}}{3}{figure.caption.1}\protected@file@percent }
+\providecommand*\caption@xref[2]{\@setref\relax\@undefined{#1}}
+\newlabel{fig:core_algorithm}{{1}{3}{Core algorithm flow: LIDAR perception feeds into CBF computation, which combines with nominal control to form a QP. The QP solution (or emergency recovery) produces safe control commands}{figure.caption.1}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.3}Simulation Environment}{3}{subsection.3.3}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.4}LIDAR Ray Casting}{3}{subsection.3.4}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {2}{\ignorespaces Demonstration of LIDAR simulation.}}{3}{figure.caption.2}\protected@file@percent }
+\newlabel{fig:lidar}{{2}{3}{Demonstration of LIDAR simulation}{figure.caption.2}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.5}Detection Clustering}{4}{subsection.3.5}\protected@file@percent }
+\@writefile{loa}{\contentsline {algorithm}{\numberline {1}{\ignorespaces LIDAR Detection Clustering}}{4}{algorithm.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.6}Nominal Controller Design}{4}{subsection.3.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.7}Barrier Function Design}{4}{subsection.3.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.8}Turn-First Avoidance Strategy}{4}{subsection.3.8}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.9}QP-Based Safe Controller}{4}{subsection.3.9}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.10}Emergency Recovery}{5}{subsection.3.10}\protected@file@percent }
+\@writefile{loa}{\contentsline {algorithm}{\numberline {2}{\ignorespaces Emergency Recovery}}{5}{algorithm.2}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.11}Multi-Robot Priority System}{5}{subsection.3.11}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {3.12}Division of Work}{5}{subsection.3.12}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {4}Experimental Results}{5}{section.4}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.1}Scenario 1: Single Robot with Static Obstacle}{5}{subsection.4.1}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {3}{\ignorespaces A single robot navigates toward a goal while avoiding a rectangular static obstacle positioned in its path.}}{5}{figure.caption.3}\protected@file@percent }
+\newlabel{fig:rectangle}{{3}{5}{A single robot navigates toward a goal while avoiding a rectangular static obstacle positioned in its path}{figure.caption.3}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.2}Scenario 2: Single Robot with Two Obstacles}{6}{subsection.4.2}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {4}{\ignorespaces The robot must navigate through a narrow passage formed by two static obstacles.}}{6}{figure.caption.4}\protected@file@percent }
+\newlabel{fig:obstacles}{{4}{6}{The robot must navigate through a narrow passage formed by two static obstacles}{figure.caption.4}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.3}Scenario 3: Two Robots Crossing Paths}{6}{subsection.4.3}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {5}{\ignorespaces Two robots with crossing trajectories approach an intersection.}}{6}{figure.caption.5}\protected@file@percent }
+\newlabel{fig:cross}{{5}{6}{Two robots with crossing trajectories approach an intersection}{figure.caption.5}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.4}Scenario 4: Two Robots with Obstacle (Priority System)}{6}{subsection.4.4}\protected@file@percent }
+\@writefile{lof}{\contentsline {figure}{\numberline {6}{\ignorespaces Two robots and a static obstacle, with robots being funneled together, the priority system makes the one behind "push" the other}}{6}{figure.caption.6}\protected@file@percent }
+\newlabel{fig:2robot}{{6}{6}{Two robots and a static obstacle, with robots being funneled together, the priority system makes the one behind "push" the other}{figure.caption.6}{}}
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.5}Quantitative Analysis}{7}{subsection.4.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.6}Parameter Sensitivity}{7}{subsection.4.6}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {4.7}Gazebo Simulation}{7}{subsection.4.7}\protected@file@percent }
+\@writefile{toc}{\contentsline {section}{\numberline {5}Conclusion}{7}{section.5}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.1}Advantages of the Approach}{7}{subsection.5.1}\protected@file@percent }
+\@writefile{toc}{\contentsline {subsection}{\numberline {5.2}Limitations and Future Work}{7}{subsection.5.2}\protected@file@percent }
+\bibcite{ferraguti2022}{1}
+\bibcite{professor_slides_2023}{2}
+\@writefile{toc}{\contentsline {section}{References}{8}{subsection.5.2}\protected@file@percent }
+\gdef \@abspage@last{8}
